@@ -1,9 +1,28 @@
 # encoding=utf-8
+from numpy import *
 
 # 判断一个特征值应该是"lt"还是"rt"
 def stumpClassify(dataMatrix,dimen,threshVal,threshIneq):
 	retArray = ones((shape(dataMatrix)[0],1))
+	# retArray得到和 dataMatrix一样的行数，但只有1列，全部初始化为1
+	# retArray只有这一列，这代表的是当前正在判断的维度，初始为1. 
+	# array([[ 1.],
+   	# 		[ 1.],
+   	# 		[ 1.],
+  	# 		[ 1.],
+   	# 		[ 1.]])
+   	# retArray[0] 、 [1]、 [2] 就取到 
+
+
 	if threshIneq == 'lt':
+		# 如果为左节点，那么把 retArray 所代表的这个维度的原始值 dataMatrix[:,dimen]和 阈值threshVal比较得到
+		# >>> dataMatrix[:,dimen] <= threshVal
+		# matrix([[ True],
+		#         [False],
+		#         [False],
+		#         [ True],
+		#         [False]], dtype=bool)
+		# 这东西作为retArray的索引表示哪里该赋值哪里不该赋值
 		retArray[dataMatrix[:,dimen] <= threshVal] = -1.0
 	else:
 		retArray[dataMatrix[:,dimen] > threshVal] = -1.0
@@ -18,20 +37,30 @@ def buildStump(dataArr,classLabels,D):
 	m,n=shape(dataMatrix)
 	numSteps = 10.0
 	bestStump={}
-	bestClasEst = mat(zeros(m,1))
+	bestClasEst = mat(zeros((m,1)))
 
 	minError = inf
 	for i in range(n):
+		# n，两列，是后续分类 stumpClassify 中的 “维度” dimen
 		rangeMin = dataMatrix[:,i].min()
 		rangeMax = dataMatrix[:,i].max()
 		stepSize = (rangeMax-rangeMin)/numSteps
 		for j in range(-1,int(numSteps)+1):
 			# 遍历当前维度(i)
-			for inequal in ['lt','gt']:
+			for inequal in ['lt','rt']:
 				threshVal = (rangeMin + float(j)*stepSize)
+				# 这里算这个阈值比较重要，为什么这样算 >>>PROBLEM
 				predictedVals = stumpClassify(dataMatrix,i,threshVal,inequal)
+				# 这里得到的预测值 predictedVals形如：
+				# array([[-1.],
+				# 		[ 1.],
+				# 		[ 1.],
+				# 		[-1.],
+				# 		[ 1.]])
 				errArr = mat(ones((m,1)))
 				errArr[predictedVals == labelMat] = 0 
+				# labelMat
+				# 这里应该是，传入得数据都是标签为1的，所以同时也会传进来一个labele为1，然后构造了值全为1的矩阵labelMat
 				weightedError = D.T*errArr
 				if weightedError < minError:
 					minError = weightedError
@@ -41,31 +70,25 @@ def buildStump(dataArr,classLabels,D):
 					bestStump['ineq'] = inequal
 	return bestStump,minError,bestClasEst
 
+def loadDataArr(fileName):
+	dataArr=[]
+	file = open(fileName)
+	for line in file.readlines():
+		lineArr = line.strip().split()
+		floatedLineArr = map(float,lineArr)
+		dataArr.append(floatedLineArr)
+	return dataArr
+
+def main():
+	dataArr = loadDataArr("data/testSet_stump.txt")
+	D = mat(ones((5,1))/5)
+	bestStump,minError,bestClasEst = buildStump(dataArr,classLabels,D)
+	# classLabels 应该是要自己指定的，类似classLabels =1 
+	# 这个应该是说，现在传给他的数据集 dataArr都是正样本 还是都是负样本
 
 
-
-
-
-
-
-
-
-
-
-
-	
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == '__main__':
+	main()
 
 
 

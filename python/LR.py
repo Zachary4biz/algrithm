@@ -111,7 +111,7 @@ def showLogRegres(weights, train_x, train_y):
 def loadData():  
     train_x = []  
     train_y = []  
-    fileIn = open('testSet.txt')
+    fileIn = open('data/testSet_LR.txt')
     for line in fileIn.readlines():  
         lineArr = line.strip().split()  
         train_x.append([1.0, float(lineArr[0]), float(lineArr[1])])  

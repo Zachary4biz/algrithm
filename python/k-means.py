@@ -108,7 +108,7 @@ def show_ori(dataMat):
 
 def main():
     # 读取数据的套路都是一样的，建一个空数组，读取文件按行放入数组，然后把数组mat一下
-    dataMat = loadDataSet('data/testSet_k-means.txt')
+    dataMat = loadDataSet('raw_data/testSet_k-means.txt')
     myCentroids, clustAssing = kMeans(dataMat, 4)
     print myCentroids
     show_ori(dataMat)

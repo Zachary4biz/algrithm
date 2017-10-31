@@ -82,7 +82,7 @@ def loadDataArr(fileName):
 
 
 def main():
-    dataArr = loadDataArr("data/testSet_stump.txt")
+    dataArr = loadDataArr("raw_data/testSet_stump.txt")
     D = mat(ones((5, 1)) / 5)
     classLabels = 1.0
     bestStump, minError, bestClassEst = buildStump(dataArr, classLabels, D)

@@ -7,7 +7,7 @@ import pandas as pd
 # from >>>>> http://www.cnblogs.com/190260995xixi/p/5940356.html
 
 schema = ["user_id", "item_id", "rating", "timestamp"]
-df = pd.read_csv("ml-100k/u.data", sep="\t", names=schema)
+df = pd.read_csv("raw_data/ml-100k/u.data", sep="\t", names=schema)
 
 # shape表示行、列,shape[0]表示这个user_id的行数,即多少个user_id
 n_users = df.user_id.unique().shape[0]

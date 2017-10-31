@@ -108,7 +108,7 @@ def showLogRegres(weights, train_x, train_y):
     y_min_x = float(-weights[0] - weights[1] * min_x) / weights[2]
     y_max_x = float(-weights[0] - weights[1] * max_x) / weights[2]
     plt.plot([min_x, max_x], [y_min_x, y_max_x], '-g')
-    plt.xlabel('X1');
+    plt.xlabel('X1')
     plt.ylabel('X2')
     plt.show()
 
@@ -116,7 +116,7 @@ def showLogRegres(weights, train_x, train_y):
 def loadData():
     train_x = []
     train_y = []
-    fileIn = open('data/testSet_LR.txt')
+    fileIn = open('raw_data/testSet_LR.txt')
     for line in fileIn.readlines():
         lineArr = line.strip().split()
         train_x.append([1.0, float(lineArr[0]), float(lineArr[1])])
@@ -136,7 +136,7 @@ def loadData():
     #
 
 
-## step 1: load data  
+## step 1: load data
 print "step 1: load data..."
 train_x, train_y = loadData()
 test_x = train_x;

@@ -102,3 +102,4 @@ ENV/
 *.ipynb
 *.xml
 *.iml
+.name

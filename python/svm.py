@@ -37,6 +37,7 @@ clf1 = svm.SVC(C=0.1, kernel='linear', decision_function_shape='ovr')
 clf2 = svm.SVC(C=0.8, kernel='rbf', gamma=20, decision_function_shape='ovr')
 clf2.fit(x_train, y_train.ravel())  # ravel() 多维数组处理成一维,和flattern功能一样
 
+
 # 计算svc分类器准确率
 print clf2.score(x_train, y_train, sample_weight=None)
 y_hat = clf2.predict(x_train)

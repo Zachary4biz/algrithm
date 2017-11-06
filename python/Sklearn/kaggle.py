@@ -37,7 +37,8 @@ IDtest = test["PassengerId"]
 
 
 def manipulate():
-
+    # todo
+    pass
 
 # ==============1.Outlier detection=======================================
 def detect_outliers(df, n, features):

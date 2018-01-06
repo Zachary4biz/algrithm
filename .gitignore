@@ -102,3 +102,7 @@ ENV/
 *.xml
 *.iml
 .name
+*.jpg
+*.pkl
+*.csv
+*.tsv

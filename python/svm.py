@@ -6,8 +6,9 @@ from sklearn.model_selection import train_test_split
 
 import numpy as np
 
+print ("loading iris data...")
 iris = load_iris()
-iris.keys()
+print(u"iris keys:%s"%iris.keys())
 # 共150条记录
 # ['target_names', 'data', 'target', 'DESCR', 'feature_names']
 # target_names:分类名称(setosa,versicolor,virginica)
@@ -16,10 +17,12 @@ iris.keys()
 # data:特征值,
 # DESCR: 对iris数据集的描述,字符串
 
+print ("get ndarray type data")
 # 将bunch类型的iris变成ndarray类型的数据
 # np.hstack行方向合并,np.vstack列方向合并,但这两个都需要是维度完全相同的矩阵
 # np.column_stack 列方向上可以合并不同维度的矩阵
 data = np.column_stack((iris.data, iris.target))
+
 
 # 将iris分为训练集与测试集
 # 这里其实..又把矩阵data按列拆开了,从第四列拆开
@@ -39,5 +42,11 @@ clf2.fit(x_train, y_train.ravel())  # ravel() 多维数组处理成一维,和fla
 
 
 # 计算svc分类器准确率
+print ("分类器准确率:")
 print clf2.score(x_train, y_train, sample_weight=None)
 y_hat = clf2.predict(x_train)
+
+
+
+
+

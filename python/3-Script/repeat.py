@@ -45,8 +45,8 @@ t0 = time.time()
 # params
 yesterday = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 dependent_file_path = "/userprofile/user_profile_behavior/dt=%s/_SUCCESS" % yesterday
-script = "InstallAppRankingList.sh"
-script_output = "out-InstallAppRankingList.out"
+script = "merge_workflow.sh"
+script_output = "out-merge_workflow.out"
 print("dependent_file_path is =============> %s" % dependent_file_path)
 print("script to be executed is ===========> %s" % script)
 print("file to save output of script is ===> %s" % script_output)
@@ -60,25 +60,29 @@ print("\ndependent-file checking.... begin at %s" % time.ctime())
 while result != 0:
     sys.stdout.flush()
     time.sleep(10)
-    if time.time() - t0 < 5400:
+    if time.time() - t0 < 60*60*1.5:
         # retry less than 1.5 hour
         result = os.system(command)
-    elif time.time() - t0 == 7200:
-        print ("    dependent-file delay 2 hour, send mail, keep retry")
-    elif time.time() - t0 < 10800:
-        # retry less than 3 hour send mail
-        print("     dependent-file delay more than 2 hour, send mail, keep retry.")
+    elif time.time() - t0 == 60*60*2:
+        print ("    delay 2 hour, keep retry")
+        result = os.system(command)
+    elif time.time() - t0 < 60*60*8:
+        # retry less than 8 hour send mail
+        print("     delay more than 4 hour, keep retry")
+        result = os.system(command)
         sys.stdout.flush()
     else:
-        # retry more than 2 hour , quit
-        result = 0
-        print("     dependent-file delay more than 3 hour, send mail and quit.")
-        sys.stdout.flush()
-        mail_text = "dependent-file has already been delayed 3 hour. won't keep retry.\n ------- \n A line incase this mail get blocked"
-        mail_subject = "repeat.py_Failed"
-        mail_from_addr = "RepeatFail"
-        sendmail(mail_text, mail_subject, mail_from_addr)
-        sys.exit("delay more than 2 hour, quit script")
+        # retry more than 8 hour , wait 2hour
+        time.sleep(60*60*2)
+        result = os.system(command)
+        if result !=0:
+            print("     dependent-file delay more than 3 hour, send mail and quit.")
+            sys.stdout.flush()
+            mail_text = "dependent-file has already been delayed 3 hour. won't keep retry.\n ------- \n A line incase this mail get blocked"
+            mail_subject = "repeat.py_Failed"
+            mail_from_addr = "RepeatFail"
+            sendmail(mail_text, mail_subject, mail_from_addr)
+            sys.exit("delay more than 4 hour, quit script")
 print("\ndependent-file is generated %s" % time.ctime())
 
 print("executing script : %s ....\n" % script)
@@ -90,4 +94,8 @@ if len(sh_result)<1:
 f = open(script_output,"w+")
 map(lambda x: f.write(x), sh_result)
 f.close()
-
+print("file close, now send sucess mail")
+mail_text = "job done."
+mail_subject = "merge_workFlow status"
+mail_from_addr = "namenode@apusapps.com"
+sendmail(mail_text, mail_subject, mail_from_addr)

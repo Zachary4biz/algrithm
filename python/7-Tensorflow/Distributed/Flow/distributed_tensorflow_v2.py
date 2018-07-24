@@ -2,23 +2,23 @@
 import math
 import tempfile
 import time
+import sys
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
 flags = tf.app.flags
 IMAGE_PIXELS = 28
 # 定义默认训练参数和数据路径
-flags.DEFINE_string('data_dir', '/tmp/mnist-data', 'Directory  for storing mnist data')
+flags.DEFINE_string('data_dir', '/data/houcunyue/zhoutong/tmp/mnist-data', 'Directory  for storing mnist data')
 flags.DEFINE_integer('hidden_units', 100, 'Number of units in the hidden layer of the NN')
 flags.DEFINE_integer('train_steps', 10000, 'Number of training steps to perform')
 flags.DEFINE_integer('batch_size', 100, 'Training batch size ')
 flags.DEFINE_float('learning_rate', 0.01, 'Learning rate')
+
 # 定义分布式参数
 # 参数服务器parameter server节点
 flags.DEFINE_string('ps_hosts', '10.10.16.15:6650', 'Comma-separated list of hostname:port pairs')
-# 两个worker节点
-flags.DEFINE_string('worker_hosts', '10.10.16.12:6650,10.10.16.13:6650',
-                    'Comma-separated list of hostname:port pairs')
+flags.DEFINE_string('worker_hosts', '10.10.16.12:6650,10.10.16.13:6650','Comma-separated list of hostname:port pairs')
 # 设置job name参数
 flags.DEFINE_string('job_name', None, 'job name: worker or ps')
 # 设置任务的索引
@@ -53,9 +53,7 @@ def main(unused_argv):
 
     is_chief = (FLAGS.task_index == 0)
     # worker_device = '/job:worker/task%d/cpu:0' % FLAGS.task_index
-    with tf.device(tf.train.replica_device_setter(
-            cluster=cluster
-    )):
+    with tf.device(tf.train.replica_device_setter(cluster=cluster)):
         global_step = tf.Variable(0, name='global_step', trainable=False)  # 创建纪录全局训练步数变量
 
         hid_w = tf.Variable(tf.truncated_normal([IMAGE_PIXELS * IMAGE_PIXELS, FLAGS.hidden_units],
@@ -73,11 +71,23 @@ def main(unused_argv):
         hid = tf.nn.relu(hid_lin)
 
         y = tf.nn.softmax(tf.nn.xw_plus_b(hid, sm_w, sm_b))
-        cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
-
+        loss_cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
         opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
+        #################################
 
-        train_step = opt.minimize(cross_entropy, global_step=global_step)
+        if FLAGS.issync == 1:
+            # 同步模式更新梯度
+            rep_op = tf.train.SyncReplicasOptimizer(opt,replicas_to_aggregate=len(worker_spec),
+                                           total_num_replicas=len(worker_spec),
+                                           use_locking=True)
+            train_op = rep_op.apply_gradients(opt.compute_gradients(loss_cross_entropy),global_step=global_step)
+            init_token_op = rep_op.get_init_tokens_op()
+            chief_queue_runner = rep_op.get_chief_queue_runner()
+        else:
+            # 异步模式更新梯度
+            train_op = opt.apply_gradients(opt.compute_gradients(loss_cross_entropy), global_step=global_step)
+
+        train_step = opt.minimize(loss_cross_entropy, global_step=global_step)
         # 生成本地的参数初始化操作init_op
         init_op = tf.global_variables_initializer()
         train_dir = tempfile.mkdtemp()
@@ -114,9 +124,18 @@ def main(unused_argv):
         print ('Training elapsed time:%f s' % train_time)
 
         val_feed = {x: mnist.validation.images, y_: mnist.validation.labels}
-        val_xent = sess.run(cross_entropy, feed_dict=val_feed)
+        val_xent = sess.run(loss_cross_entropy, feed_dict=val_feed)
         print ('After %d training step(s), validation cross entropy = %g' % (FLAGS.train_steps, val_xent))
     sess.close()
+
+# 同步模式计算更新梯度
+def update_sync(tf):
+    rep_op = tf.train.SyncReplicasOptimizer()
+    pass
+
+def update_async():
+    pass
+
 
 if __name__ == '__main__':
     tf.app.run()

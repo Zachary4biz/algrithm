@@ -7,6 +7,7 @@ from progressbar import *
 import pickle
 import os
 import sys
+import math
 
 # python 2.7
 # 思路参考:http://songshuhui.net/archives/10462

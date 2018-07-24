@@ -104,6 +104,7 @@ def main(unused_argv):
         time_begin = time.time()
         print ('Traing begins @ %f' % time_begin)
 
+
         local_step = 0
         while True:
             batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size)

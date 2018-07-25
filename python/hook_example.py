@@ -2,6 +2,7 @@
 
 import datetime
 import functools
+import time
 
 ######
 # 使用装饰器 decorator 进行 hook
@@ -83,3 +84,15 @@ target_func = wrap_func(target_func,replaced_func)
 print("hook 之后: target_func(2)=%s, 函数签名: %s" % (target_func(2), target_func.__name__))
 
 
+def wrap_print(ori_func, new_func):
+    @functools.wraps(ori_func)
+    def run(*args, **kwargs):
+        return new_func(ori_func, *args, **kwargs)
+    return run
+def replaced_print(ori_function, parameter):
+    now = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time()))
+    new_params = now+": "+parameter
+    return ori_function(new_params)
+# old_print = print
+print=wrap_func(print,replaced_print)
+print("print方法已经被hook,会自动输出时间前缀")

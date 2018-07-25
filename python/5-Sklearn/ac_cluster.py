@@ -70,38 +70,37 @@ def main():
     # 所以需要一个 .dropna(axis='columns',how='all').columns ,把全NaN的丢掉
     #######
     dummy_df = pd.get_dummies(input_df,prefix_sep="=")
-
+    dummy_df = dummy_df.sample(n=600)
 
     # 把 ip、event_time_l、权重增大
     # DBSCAN原生的方法只支持样本的权重,不支持特征的权重,得从metric下手或者修改dummy_df的值
     # 遍历 dummy_df,对于带有指定字符的列,如果值是1就改为 1.5 或 2,即增加权重
-    dummy_df.apply(lambda row:row.filter(like="client_ip_s"), axis=1)
     all_field = list(dummy_df.columns)
-    weight_w1_filed = list(filter(lambda x: 'client_ip_init_s' in x,all_field))
+    # weight_w1_filed = list(filter(lambda x: 'client_ip_init_s' in x,all_field))
     weight_w2_filed = list(filter(lambda x: 'client_ip_s' in x or "event_time_l" in x,all_field))
-    dummy_df[weight_w1_filed] = dummy_df[weight_w1_filed].replace(1,1.5)
+    # dummy_df[weight_w1_filed] = dummy_df[weight_w1_filed].replace(1,1.5)
     dummy_df[weight_w2_filed] = dummy_df[weight_w2_filed].replace(1,2)
 
-
+    from sklearn.metrics.pairwise import euclidean_distances
+    euclidean_distances(X=dummy_df)
+    ######
+    # 使用欧氏距离
     # one-hot编码后特征都是 1, 共23个特征
     # 所以如果23个特征不一样,欧氏距离就是 math.pow(46,0.5)=6.7823
     # 如果控制 4个特征一样,欧氏距离就是 math.pow(46-2*4,0.5) = 6.1644
-    # 如果控制 5个特征一样,欧氏距离就是 math.pow(46-2*5,0.5) = 6.0
-    # 如果控制 6个特征一样,欧氏距离就是 math.pow(46-2*6,0.5) = 5.83
-    # 如果控制 7个特征一样,欧氏距离就是 math.pow(46-2*7,0.5) = 5.65
-    # 如果控制10个特征一样,欧氏距离就是 math.pow(46-2*10,0.5) = 5.099019
-    # 如果控制12个特征一样,欧氏距离就是 math.pow(46-2*12,0.5) = 4.69
-    # 如果控制13个特征一样,欧氏距离就是 math.pow(46-2*13,0.5) = 4.47
     # 如果控制15个特征一样,欧氏距离就是 math.pow(46-2*15,0.5) = 4.0
+    # 如果有一个权重是2的特征不一样,欧氏距离至少是 (2^2+2^2)^0.5 math.pow(8,0.5)
     # 注: 以上只在两个样本特征总数一样的情况下,使用了NaN替换空串特征后,dummy编码不会编码NaN,这样两个样本的特征总数可能就不一样了
-    sample_df = dummy_df.sample(n=600)
     total_feature_cnt = 12
     same_feature_cnt = 7
     eps = math.pow(2*(12-6),0.5)
-    cluster_result = DBSCAN(eps=3.46, min_samples=15).fit_predict(X=sample_df)
+    cluster_result = DBSCAN(eps=4.5, min_samples=15).fit_predict(X=dummy_df)
+    ######
+    # 尝试使用jaccard度量
     jaccard_sim = 0.3
     jaccard_diff = 1- jaccard_sim
     # cluster_result = DBSCAN(eps=1-0.2, min_samples=15, metric='jaccard').fit_predict(X=sample_df)
+
     print("各个类别的样本个数统计")
     print(list(zip(np.unique(cluster_result[cluster_result!=-1]),np.bincount(cluster_result[cluster_result!=-1]))))
     print("各个类别的idx")
@@ -109,7 +108,7 @@ def main():
         print("====> 类别 %s" % i)
         idx_list = np.where(cluster_result==i)[0]
         for j in idx_list:
-            user_info = sample_df.iloc[j][sample_df.iloc[j]!=0]
+            user_info = dummy_df.iloc[j][dummy_df.iloc[j]!=0]
             info_str = ",".join(list(pd.DataFrame(user_info).T.columns))
             print(info_str)
 

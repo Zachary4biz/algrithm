@@ -71,7 +71,11 @@ def main(_):
             # 记录全集训练步数
             global_step = tf.Variable(0, name='global_step', trainable=False)
             # 定义训练模型, Adagrad梯度下降
-            train_op = tf.train.AdagradOptimizer(FLAGS.learning_rate).minimize(loss_cross_entropy, global_step=global_step)
+            opt = tf.train.AdagradOptimizer(FLAGS.learning_rate)
+            #################################
+
+
+            train_op = opt.minimize(loss_cross_entropy, global_step=global_step)
             # 定义模型精确度验证模型, 统计模型精确度
             correrct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
             accuracy = tf.reduce_mean(tf.cast(correrct_prediction, tf.float32))

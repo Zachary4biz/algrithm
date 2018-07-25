@@ -26,6 +26,10 @@ import  tensorflow as tf
 # make install
 # cd python3/bin
 # ./python3
+#
+# ##### 下载 Criteo 的 2014-Kaggle 数据集
+# wget --spider  https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz
+# wget -c -b -O CriteoData.tar.gz --limit-rate=300k https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz
 ######
 def test_script():
     # 现在假设我们有A、B、C、D四台机器，首先需要在各台机器上写一份代码，并跑起来，各机器上的代码内容大部分相同，除了开始定义的时候，需要各自指定该台机器的task之外。

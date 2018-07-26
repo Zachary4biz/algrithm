@@ -48,25 +48,30 @@ def main(unused_argv):
         raise ValueError('Must specify an explicit task_index!')
     else:
         print_t('task_index : %d\n' % FLAGS.task_index)
-
+    ############################################
+    ################## 参数准备 #################
     ps_spec = FLAGS.ps_hosts.split(',')
     worker_spec = FLAGS.worker_hosts.split(',')
     cluster = tf.train.ClusterSpec({'ps': ps_spec, 'worker': worker_spec})
     server = tf.train.Server(cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
     is_chief = (FLAGS.task_index == 0)
-    # 为了能终止ps_server
-    pid = os.getpid()
-    print("进程号是: %s" % pid)
 
+    print("进程号是: %s" % os.getpid())
+    ################################################
+    ################## ps / worker #################
     if FLAGS.job_name == 'ps':
         print_t("enter ps mode. \n")
         server.join()
     elif FLAGS.job_name == 'worker':
         print_t("enter worker mode. \n")
+        ################################################
+        ################## worker 配置 #################
         with tf.device(tf.train.replica_device_setter(worker_device="/job:worker/task:%d" % FLAGS.task_index,
                                                       cluster=cluster)):
             global_step = tf.Variable(0, name='global_step', trainable=False)  # 创建纪录全局训练步数变量
-             # 定义TensorFlow隐含层参数变量,为全连接神经网络隐含层
+            #########################################################################
+            ############################# worker 配置计算任务 ########################
+            # 定义TensorFlow隐含层参数变量,为全连接神经网络隐含层
             hid_w = tf.Variable(tf.truncated_normal([IMAGE_PIXELS * IMAGE_PIXELS, FLAGS.hidden_units],
                                                     stddev=1.0 / IMAGE_PIXELS), name='hid_w')
             hid_b = tf.Variable(tf.zeros([FLAGS.hidden_units]), name='hid_b')
@@ -83,9 +88,9 @@ def main(unused_argv):
             # 定义softmax回归模型,及损失方程
             y = tf.nn.softmax(tf.nn.xw_plus_b(hid, sm_w, sm_b))
             loss_cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
-
-            ##### 设定训练 train_step, 默认是异步更新?
             opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
+            #############################################################################
+            ######################    worker 配置训练方式及相应的初始化    #################
             if FLAGS.issync:
                 # 启用同步更新参数
                 opt = tf.train.SyncReplicasOptimizer(opt,
@@ -111,8 +116,8 @@ def main(unused_argv):
                 chief_queue_runner = opt.get_chief_queue_runner()
                 # 同步标记队列初始值设定
                 sync_init_op = opt.get_init_tokens_op()
-
-            ##### 管理训练相关操作的部分
+            #############################################################################
+            ################## worker 配置相应训练方式的Supervisor管理任务 #################
             if FLAGS.issync:
                 # 同步更新
                 sv = tf.train.Supervisor(is_chief=is_chief,
@@ -129,6 +134,9 @@ def main(unused_argv):
                                          init_op=init_op,
                                          recovery_wait_secs=1,
                                          global_step=global_step)
+
+            ##################################################################################
+            ################## worker 配置相应训练方式的session会话,并进行初始化 #################
             ##########
             # 配置分布式会话
             #    没有可用GPU时使用CPU
@@ -145,12 +153,10 @@ def main(unused_argv):
                 print_t("Worker %d: Initializing session ... " % FLAGS.task_index)
             else:
                 print_t("Worker %d: Waiting for session to be initialized..." % FLAGS.task_index)
-
             ##### 构建会话
             # sess = sv.prepare_or_wait_for_session(server.target, config = sess_config)
             sess = sv.prepare_or_wait_for_session(server.target)
             print_t("Worker %d: Session initialization complete.\n" % FLAGS.task_index)
-
             if FLAGS.issync and is_chief:
                 # 同步更新模式的chief worker
                 print_t("同步训练的chief worker进行初始化准备\n")
@@ -158,24 +164,27 @@ def main(unused_argv):
                 sess.run(sync_init_op)
                 # 启动相关线程，运行各自服务
                 sv.start_queue_runners(sess,[chief_queue_runner])
-
-            ###### 执行训练
+            ######################################################
+            ################## worker 执行训练迭代 #################
             time_b = time.time()
             print_t("Training begins")
             local_step = 0
             while True:
                 batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size)
+                # 已确认每个worker拿到的数据是不一样的
+                # print_t("task_index: %s, 目标y是数字: '%s'" % (FLAGS.task_index, ",".join([str(x) for x in batch_ys.nonzero()[1]])))
                 train_feed = {x: batch_xs, y_: batch_ys}
                 _, loss, step = sess.run([train_step, loss_cross_entropy,global_step], feed_dict=train_feed)
                 local_step += 1
-                # print_t ('Worker %d: local_step %d done (global step:%d)' % (FLAGS.task_index, local_step, step))
-                if step % 500 == 0:
-                    w,b = sess.run([sm_w,sm_b])
-                    print_t("\nbiase: %s, \nloss: %s, local_step: %s, global_step: %s \n" %(b, loss, local_step, step))
+                print_t ('Worker {idx}: '
+                         'local_step: {local_step} done '
+                         '(global step:{global_step})'
+                         ' loss: {loss}'.format(idx=FLAGS.task_index, local_step=local_step, global_step=step, loss=("%.4f" % loss)))
                 if step >= FLAGS.train_steps:
                     break
 
-            ##### 训练结束,评测
+            ######################################################
+            ################## 训练结束, 进行评测 #################
             time_e = time.time()
             print_t("Training ends")
             print_t("Training elapsed time: %f s" % (time_e - time_b))
@@ -185,6 +194,28 @@ def main(unused_argv):
             # todo:似乎不能写在这里?
             sess.close()
 
+def nn(tf):
+    # 定义TensorFlow隐含层参数变量,为全连接神经网络隐含层
+    hid_w = tf.Variable(tf.truncated_normal([IMAGE_PIXELS * IMAGE_PIXELS, FLAGS.hidden_units],
+                                             stddev=1.0 / IMAGE_PIXELS), name='hid_w')
+    hid_b = tf.Variable(tf.zeros([FLAGS.hidden_units]), name='hid_b')
+    # 定义TensorFlow回归层的参数变量
+    sm_w = tf.Variable(tf.truncated_normal([FLAGS.hidden_units, 10],
+                                           stddev=1.0 / math.sqrt(FLAGS.hidden_units)), name='sm_w')
+    sm_b = tf.Variable(tf.zeros([10]), name='sm_b')
+    # 定义模型输入数据变量(x为输入图片数据, y_为分类)
+    x = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
+    y_ = tf.placeholder(tf.float32, [None, 10])
+    # 定义隐含层及神经元计算模型
+    hid_lin = tf.nn.xw_plus_b(x, hid_w, hid_b)
+    hid = tf.nn.relu(hid_lin)
+    # 定义softmax回归模型,及损失方程
+    y = tf.nn.softmax(tf.nn.xw_plus_b(hid, sm_w, sm_b))
+    loss_cross_entropy = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
+
+    ##### 设定训练 train_step, 默认是异步更新?
+    opt = tf.train.AdamOptimizer(FLAGS.learning_rate)
+    return loss_cross_entropy,opt
 
 if __name__ == '__main__':
     tf.app.run()

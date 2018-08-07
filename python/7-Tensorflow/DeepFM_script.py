@@ -1,10 +1,11 @@
 # encoding=utf-8
 import tensorflow as tf
 from sklearn.metrics import roc_auc_score
-from DataReader import FeatureDictionary,DataParser
+from DataReader import FeatureDictionary
 from DeepFM import DeepFM
 import pandas as pd
 import time
+import json
 import sys
 
 ########
@@ -39,20 +40,20 @@ dfm_params_local = {
 }
 
 # prepare training and validation data in the required format
-def prepare():
+def prepare(path="/data/houcunyue/zhoutong/data/CriteoData/train.txt"):
     col_names = ['target'] + ["feature_%s" % i for i in range(39)]
     # 已知前13列特征都是numeric
     dtype_dict = {x:float for x in col_names[:13]}
     for x in col_names[13:] : dtype_dict[x] = object
     chunk_size = 200*10000
-    _reader = pd.read_csv("/data/houcunyue/zhoutong/data/CriteoData/train_splitted00.txt", header=None,
+    _reader = pd.read_csv(path, header=None,
                           names=col_names,
                           delimiter="\t",
                           chunksize=chunk_size,
                           dtype=dtype_dict)
     train_data_chunks = []
     test_data_chunks = []
-    print_t("   loading data...")
+    print_t("   loading data from: %s" % path)
     for chunk in _reader:
         df_chunk = chunk
         cut_idx = int(0.8*df_chunk.shape[0])
@@ -85,17 +86,60 @@ def parse(input_data,fd):
     Xv = dfv.values.tolist()
     return Xi,Xv,y
 
-print_t("prepare")
-train_data,test_data,feature_dict = prepare()
-print_t("parse for train")
-Xi_train,Xv_train,y_train = parse(train_data,fd=feature_dict)
-print_t("parse for valid")
-Xi_valid,Xv_valid,y_valid = parse(test_data,fd=feature_dict)
+# print_t("prepare")
+# train_data,test_data,feature_dict = prepare()
+#
+# print_t("parse for train")
+# Xi_train,Xv_train,y_train = parse(train_data,fd=feature_dict)
+# print_t("parse for valid")
+# Xi_valid,Xv_valid,y_valid = parse(test_data,fd=feature_dict)
 
+def parse_from_cunyue(path="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"):
+    Xi_total, Xv_total, y_total = ([] for _ in range(3))
+
+    holder = "41257219*1+1"
+    # holder = "10*10000"
+    i = 0
+    print_t("   reading ...")
+    with open(path,"r") as f:
+        data = f.readlines()
+    print_t("   parsing ...")
+    for line in data:
+        if i >= eval(holder) : break
+        # sys.stdout.write(" "*30 + "\r")
+        # sys.stdout.flush()
+        # sys.stdout.write("%s/(%s)" % (i,holder))
+        # sys.stdout.flush()
+        i += 1
+        info = list(map(lambda x:x.strip(), line.split("\t")))
+        # 这里,原始文件中离散特征是从1开始建立索引的,所以加上12,0~12分配给连续特征
+        idx_list = list(range(13)) + list(map(lambda x: 12+int(x), info[1].split(",")))
+        value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13,13+26)]
+        lalbel = int(info[2])
+        Xi_total.append(idx_list)
+        Xv_total.append(value_list)
+        y_total.append(lalbel)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    from itertools import chain
+    feature_dim = max(list(chain(*Xi_total)))+1
+    print_t("   feature_dim:%s" % feature_dim)
+    field_size = len(Xi_total[0])
+    print_t("   field_size:%s" % field_size)
+    cut_idx = int(0.8*len(Xi_total))
+    print_t("   allocation ...")
+    Xi_, Xv_, y_ = (target[cut_idx:] for target in [Xi_total, Xv_total, y_total])
+    Xi, Xv, y = (target[:cut_idx] for target in [Xi_total, Xv_total, y_total])
+    return Xi,Xv,y,Xi_,Xv_,y_,feature_dim,field_size
+
+print_t("loading data")
+Xi_train,Xv_train,y_train, Xi_valid,Xv_valid,y_valid,feature_dim,field_size = parse_from_cunyue()
 
 # init a DeepFM model
-dfm_params_local["feature_size"] = feature_dict.feat_dim
-dfm_params_local["field_size"] = len(Xi_train[0])
+# dfm_params_local["feature_size"] = feature_dict.feat_dim
+# dfm_params_local["field_size"] = len(Xi_train[0])
+dfm_params_local["feature_size"] = feature_dim
+dfm_params_local["field_size"] = field_size
 dfm_local = DeepFM(**dfm_params_local)
 
 # fit a DeepFM model

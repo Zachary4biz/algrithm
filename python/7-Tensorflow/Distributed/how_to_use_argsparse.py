@@ -7,7 +7,10 @@ parser.add_argument("--argument3", type=int, choices=[1, 2], help='argument3 只
 parser.add_argument("--argument4", type=str, default="defualt_arg4", help='a help for argument4')
 print(parser.parse_args())
 args = parser.parse_args()
+for x,y in args.__dict__.items():
+    print(x, y)
 print("arg1 is "+ str(args.argument1))
 print("arg2 is "+ str(args.argument2))
 print("arg3 is "+ str(args.argument3))
 print("arg4 is "+ str(args.argument4))
+

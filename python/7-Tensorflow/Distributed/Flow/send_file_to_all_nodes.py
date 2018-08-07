@@ -8,6 +8,8 @@
 #######
 
 import os
+import sys
+import time
 import argparse
 
 # def update_file():
@@ -29,21 +31,28 @@ import argparse
 #         result = os.system(command)
 #         if result != 0:
 #             print("上传文件出错 namenode -- %s" % i)
-#             exit()
+#             exit()R
+
+def print_t(param):
+    now = time.strftime("|%Y-%m-%d %H:%M:%S| ", time.localtime(time.time()))
+    new_params = now + ": " + param
+    print(new_params)
+    sys.stdout.flush()
 
 # 向公共目录传一次即可
 def update_file_v2():
-    default_file_name = "distributed_tensorflow_v2_sync_support.py"
-    # default_file_name = "distributed_tensorflow_v2.py"
+    # default_file_name = "/Users/zac/5-Algrithm/python/7-Tensorflow/Distributed/Flow/distributed_tensorflow_v2_sync_support.py"
+    # default_file_name = "/Users/zac/5-Algrithm/python/7-Tensorflow/Distributed/Flow/DeepFM_distributed_script.py"
+    default_file_name = "/Users/zac/5-Algrithm/python/7-Tensorflow/DeepFM_script.py"
     default_reciever = "10.10.16.15"
     parser = argparse.ArgumentParser(description="此脚本目的是更新各个namenode上的脚本文件", epilog="an epilog after -help")
-    parser.add_argument("--file_path", type=str, default="/Users/zac/5-Algrithm/python/7-Tensorflow/Distributed/Flow/%s" % default_file_name,help='需要上传的文件')
+    parser.add_argument("--file_path", type=str, default=default_file_name,help='需要上传的文件')
     parser.add_argument("--receiver", type=str, default=default_reciever, help='接收文件的服务器')
     parser.add_argument("--namenode_path", type=str, default="/data/houcunyue/zhoutong/py_script",
                         help='存放于各个namenode的文件路径')
     args = parser.parse_args()
     command = "scp {sender_path} {receiver}:{receiver_path}".format(sender_path=args.file_path,receiver=args.receiver,receiver_path=args.namenode_path + "/" + "")
-    print("executing: %s" % command)
+    print_t("executing: %s" % command)
     if os.system(command) !=0 :
         print("上传文件错误")
         exit()

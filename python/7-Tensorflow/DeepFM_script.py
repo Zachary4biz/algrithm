@@ -7,6 +7,7 @@ from DeepFM_use_generator import DeepFM
 import pandas as pd
 import time
 import json
+import numpy as np
 import sys
 
 ########
@@ -19,6 +20,20 @@ def print_t(param):
     new_params = now + ": " + param
     print(new_params)
     sys.stdout.flush()
+
+
+def self_logloss(actual, pred, eps=1e-15):
+    # Prepare numpy array data
+    y_true = np.array(actual)
+    y_pred = np.array(pred)
+    assert (len(y_true) and len(y_true) == len(y_pred))
+    # Clip y_pred between eps and 1-eps
+    p = np.clip(y_pred, eps, 1-eps)
+    loss = np.sum(- y_true * np.log(p) - (1 - y_true) * np.log(1-p))
+    return loss / len(y_true)
+
+y_true = [0, 0, 1, 1]
+y_pred = [0.1, 0.2, 0.7, 0.99]
 
 dfm_params_local = {
     "use_fm": True,
@@ -36,7 +51,7 @@ dfm_params_local = {
     "batch_norm_decay": 0.995,
     "l2_reg": 0.01,
     "verbose": True,
-    "eval_metric": log_loss,
+    "eval_metric": self_logloss,
     "random_seed": 2017
 }
 

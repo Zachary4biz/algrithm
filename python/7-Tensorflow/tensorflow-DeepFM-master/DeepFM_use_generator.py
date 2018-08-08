@@ -435,7 +435,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         :return: metric of the evaluation
         """
         y_pred = self.predict(Xi, Xv)
-        return self.eval_metric(y, y_pred)
+        return self.eval_metric(list(map(lambda x:x[0],y)), y_pred)
 
 
     # def evaluate_generator(self, Xi_generator, Xv_generator, y_generator):

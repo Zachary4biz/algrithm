@@ -1,8 +1,9 @@
 # encoding=utf-8
 import tensorflow as tf
 from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss
 from DataReader import FeatureDictionary
-from DeepFM import DeepFM
+from DeepFM_use_generator import DeepFM
 import pandas as pd
 import time
 import json
@@ -30,12 +31,12 @@ dfm_params_local = {
     "epoch": 30,
     "batch_size": 1024,
     "learning_rate": 0.001,
-    "optimizer_type": "adam",
+    "optimizer_type": "yellowfin",
     "batch_norm": 1,
     "batch_norm_decay": 0.995,
     "l2_reg": 0.01,
     "verbose": True,
-    "eval_metric": roc_auc_score,
+    "eval_metric": log_loss,
     "random_seed": 2017
 }
 
@@ -132,8 +133,72 @@ def parse_from_cunyue(path="/data/houcunyue/soft/paddle-models/deep_fm/data/trai
     Xi, Xv, y = (target[:cut_idx] for target in [Xi_total, Xv_total, y_total])
     return Xi,Xv,y,Xi_,Xv_,y_,feature_dim,field_size
 
-print_t("loading data")
-Xi_train,Xv_train,y_train, Xi_valid,Xv_valid,y_valid,feature_dim,field_size = parse_from_cunyue()
+# print_t("loading data")
+# Xi_train,Xv_train,y_train, Xi_valid,Xv_valid,y_valid,feature_dim,field_size = parse_from_cunyue()
+
+
+def _get_Xi_reader(path):
+    with open(path,"r") as f:
+        for line in f:
+            info = line.strip().split("\t")
+            sparse_f = info[1]
+            Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
+            yield Xi
+
+
+def _get_Xv_reader(path):
+    with open(path, "r") as f:
+        for line in f:
+            info = line.strip().split("\t")
+            dense_f = info[0]
+            Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
+            yield Xv
+
+def _get_y_reader(path):
+    with open(path, "r") as f:
+        for line in f:
+            info = line.strip().split("\t")
+            label = int(info[2])
+            y = [label]
+            yield y
+
+
+def _get_valid(path):
+    Xi_valid, Xv_valid, y_valid = ([] for _ in range(3))
+    with open(path, "r") as f:
+        data = f.readlines()
+    # i = 0
+    for line in data:
+        # sys.stdout.write(" "*30 + "\r")
+        # sys.stdout.flush()
+        # sys.stdout.write("%s/4583398" % i)
+        # sys.stdout.flush()
+        # i += 1
+        info = line.strip().split("\t")
+        # 这里,原始文件中离散特征是从1开始建立索引的,所以加上12,0~12分配给连续特征
+        idx_list = list(range(13)) + list(map(lambda x: 12 + int(x), info[1].split(",")))
+        value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13, 13 + 26)]
+        lalbel = int(info[2])
+        Xi_valid.append(idx_list)
+        Xv_valid.append(value_list)
+        y_valid.append([lalbel])
+    return Xi_valid, Xv_valid, y_valid
+
+feature_dim  = 117580
+field_size = 39
+
+print_t("params:")
+for k,v in dfm_params_local.items():
+    print_t("   %s : %s" % (str(k), str(v)))
+print_t("loading data-generator")
+path="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
+# Xi_train = _get_Xi_reader(path)
+# Xv_train = _get_Xv_reader(path)
+# y_train = _get_y_reader(path)
+
+print_t("loading valid data")
+path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
+Xi_valid, Xv_valid, y_valid = _get_valid(path_valid)
 
 # init a DeepFM model
 # dfm_params_local["feature_size"] = feature_dict.feat_dim
@@ -145,7 +210,7 @@ dfm_local = DeepFM(**dfm_params_local)
 # fit a DeepFM model
 print_t("fitting ...")
 time_b = time.time()
-dfm_local.fit(Xi_train, Xv_train, y_train)
+dfm_local.fit(train_data_path=path, Xi_valid=Xi_valid,Xv_valid=Xv_valid,y_valid=y_valid)
 time_e = time.time()
 print_t("time elapse : %s s" % (time_e-time_b))
 

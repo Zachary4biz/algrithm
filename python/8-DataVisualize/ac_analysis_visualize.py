@@ -19,14 +19,14 @@ data_ori = pd.read_csv("/Users/zac/Desktop/tmpInput.csv",header=None,encoding='g
 data_ori['dt'] = data_ori['rule'].apply(lambda x : re.findall("[0-9]{4}-[0-9]{2}-[0-9]{2}",x)[0])
 data_ori['rule'] = data_ori['rule'].apply(lambda x : x[:re.search("-[0-9]{4}-[0-9]{2}-[0-9]{2}",x).span()[0]])
 # 保存图片部分
-from bokeh.plotting import figure, output_file, show
-from bokeh.io import save  #引入保存函数
-from bokeh.layouts import gridplot
-lb = 'test'
-tools = "pan,box_zoom,reset,save"  #网页中显示的基本按钮：保存，重置等
-plots = []
-path = "/Users/zac/Downloads/bokehTest.html"  #保存路径
-output_file(path)
+# from bokeh.plotting import figure, output_file, show
+# from bokeh.io import save  #引入保存函数
+# from bokeh.layouts import gridplot
+# lb = 'test'
+# tools = "pan,box_zoom,reset,save"  #网页中显示的基本按钮：保存，重置等
+# plots = []
+# path = "/Users/zac/Downloads/bokehTest.html"  #保存路径
+# output_file(path)
 
 
 # 绘图部分的设置

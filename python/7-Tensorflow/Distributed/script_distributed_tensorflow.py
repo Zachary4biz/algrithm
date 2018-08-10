@@ -21,12 +21,21 @@ import  tensorflow as tf
 # wget https://www.python.org/ftp/python/3.6.5/Python-3.6.5.tgz
 # tar -zxf Python-3.6.5.tgz
 # cd Python-3.6.5/
-# ./configure --prefix=/home/zhoutong/python3
+# ./configure --prefix=/home/zhoutong/python3 -with-ssl
 # make
-# make install
+# make install; 如果报错找不到zlib, 执行: sudo yum -y install zlib*
 # cd python3/bin
 # ./python3
-#
+# vim ~/.bashrc ; 添加环境变量 PATH=/home/zhoutong/python3/bin:$PATH; source ~/.bashrc
+# pip3 install tensorflow;
+#   - 若pip3报错找不到ssl, 可能是因为"在./configure过程中，如果没有加上–with-ssl参数时，默认安装的软件涉及到ssl的功能不可用"
+#   - rpm -aq|grep openssl 查看下openssl
+#   - yum install openssl-devel -y
+#   - ./configure --prefix=/home/zhoutong/python3 -with-ssl 重新安装一遍(报WARNING无法识别 -with-ssl,忽略后也没有问题,只要前面重装了openssl);
+#   - make install (加sudo会导致python3目录变成root用户的,后续pip3 install xxx 不方便)
+# vim python_require_packages.txt; 一行一个写入需要的库
+# pip install -r  python_require_packages.txt
+
 # ##### 下载 Criteo 的 2014-Kaggle 数据集
 # wget --spider  https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz
 # wget -c -b -O CriteoData.tar.gz --limit-rate=300k https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz

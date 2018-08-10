@@ -48,20 +48,73 @@ def fibonacci():
     print("print 方式:")
     fab_print(6) # 此时的输出为
 
+################
+# 对f.readline()做分装,仍然每次只返回一行, 例子参考: padlepadle读文件的时候,接受的参数就是一个 generator
+# 对行的处理: 每行都按句号分割,取第一句话
+################
+def yield_in_read_file():
+    def file_reader1(path):
+        # 每行都按句号分割,取第一句话
+        def process_line(data):
+            return data.split("。")[0]
+        with open(path,"r") as f:
+            for line in f:
+                result = process_line(line)
+                # print ("***触发函数内部的print函数***")
+                yield result
+
+    def file_reader2(path):
+        # 每行都按句号分割,取第一句话
+        def process_line(data):
+            return data.split("。")[-1]
+        with open(path,"r") as f:
+            for line in f:
+                result = process_line(line)
+                # print ("***触发函数内部的print函数***")
+                yield result
+    reader1 = file_reader1("/Users/zac/result.txt")
+    reader2 = file_reader2("/Users/zac/result.txt")
+
+    for i in range(10):
+        print("显示的是reader1的第%s行" % i, reader1.__next__().strip())
+        print("显示的是reader2的第%s行" % i, reader1.__next__().strip())
+        print("\n")
+
+    print("一次性比遍历所有")
+    result_generator = []
+    while True:
+        try:
+            result_generator.append(reader1.__next__())
+            result_generator.append(reader2.__next__())
+        except StopIteration:
+            print("finished")
+            print("result_generator长度是 %s " % len(result_generator))
+            break
+
+################
+# 修改DeepFM的get_batch函数,让它能够用generator生成数据,节省内存
+# 直接配合上面的 file_reader 进行测试
+################
+def test_new_get_batch():
+    def file_reader(path):
+        # 每行都按句号分割,取第一句话
+        def process_line(data):
+            return data.split("。")[0]
+        with open(path,"r") as f:
+            for line in f:
+                result = process_line(line)
+                yield result
+    def get_batch(Xi, batch_size=3):
+        Xi_=[]
+        for i in range(batch_size):
+            Xi_.append(Xi.__next__())
+        return Xi_
+
+    reader = file_reader("/Users/zac/result.txt")
+    print("第一次获取,1 2 3行",get_batch(Xi=reader))
+    print("第二次获取,4 5 6行",get_batch(Xi=reader))
+
+
 # fibonacci()
-
-
-
-def file_reader(path):
-    # 每行都按句号分割,取第一句话
-    def process_line(data):
-        return data.split("。")[0]
-    with open(path,"r") as f:
-        for line in f:
-            result = process_line(line)
-            print ("***触发函数内部的print函数***")
-            yield result
-
-reader = file_reader("/Users/zac/result.txt")
-for i in range(10): print(reader.__next__())
-
+yield_in_read_file()
+# test_new_get_batch()

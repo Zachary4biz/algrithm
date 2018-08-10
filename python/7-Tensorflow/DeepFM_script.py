@@ -2,7 +2,7 @@
 import tensorflow as tf
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import log_loss
-from DataReader import FeatureDictionary
+# from DataReader import FeatureDictionary
 from DeepFM_use_generator import DeepFM
 import pandas as pd
 import time
@@ -32,8 +32,8 @@ def self_logloss(actual, pred, eps=1e-15):
     loss = np.sum(- y_true * np.log(p) - (1 - y_true) * np.log(1-p))
     return loss / len(y_true)
 
-y_true = [0, 0, 1, 1]
-y_pred = [0.1, 0.2, 0.7, 0.99]
+y_true = [0]
+y_pred = [0]
 
 dfm_params_local = {
     "use_fm": True,
@@ -52,36 +52,37 @@ dfm_params_local = {
     "l2_reg": 0.01,
     "verbose": True,
     "eval_metric": self_logloss,
-    "random_seed": 2017
+    "random_seed": 2017,
+    "save_path": "/home/zhoutong/data/model/deep_fm"
 }
 
 # prepare training and validation data in the required format
-def prepare(path="/data/houcunyue/zhoutong/data/CriteoData/train.txt"):
-    col_names = ['target'] + ["feature_%s" % i for i in range(39)]
-    # 已知前13列特征都是numeric
-    dtype_dict = {x:float for x in col_names[:13]}
-    for x in col_names[13:] : dtype_dict[x] = object
-    chunk_size = 200*10000
-    _reader = pd.read_csv(path, header=None,
-                          names=col_names,
-                          delimiter="\t",
-                          chunksize=chunk_size,
-                          dtype=dtype_dict)
-    train_data_chunks = []
-    test_data_chunks = []
-    print_t("   loading data from: %s" % path)
-    for chunk in _reader:
-        df_chunk = chunk
-        cut_idx = int(0.8*df_chunk.shape[0])
-        train_data_chunks.append(df_chunk[:cut_idx])
-        test_data_chunks.append(df_chunk[cut_idx:])
-        print_t("   已拼接 %s 个 %s 行的chunk" % (len(train_data_chunks), chunk_size))
-    print_t("   concatting data...")
-    dfTrain = pd.concat(train_data_chunks, ignore_index=True)
-    dfTest = pd.concat(test_data_chunks, ignore_index=True)
-    print_t("   feature_dict generating ...")
-    fd = FeatureDictionary(dfTrain=dfTrain, dfTest=dfTest,numeric_cols=list(dfTrain.select_dtypes(include=['float64', 'int64'], exclude=None).columns))
-    return dfTrain,dfTest,fd
+# def prepare(path="/data/houcunyue/zhoutong/data/CriteoData/train.txt"):
+#     col_names = ['target'] + ["feature_%s" % i for i in range(39)]
+#     # 已知前13列特征都是numeric
+#     dtype_dict = {x:float for x in col_names[:13]}
+#     for x in col_names[13:] : dtype_dict[x] = object
+#     chunk_size = 200*10000
+#     _reader = pd.read_csv(path, header=None,
+#                           names=col_names,
+#                           delimiter="\t",
+#                           chunksize=chunk_size,
+#                           dtype=dtype_dict)
+#     train_data_chunks = []
+#     test_data_chunks = []
+#     print_t("   loading data from: %s" % path)
+#     for chunk in _reader:
+#         df_chunk = chunk
+#         cut_idx = int(0.8*df_chunk.shape[0])
+#         train_data_chunks.append(df_chunk[:cut_idx])
+#         test_data_chunks.append(df_chunk[cut_idx:])
+#         print_t("   已拼接 %s 个 %s 行的chunk" % (len(train_data_chunks), chunk_size))
+#     print_t("   concatting data...")
+#     dfTrain = pd.concat(train_data_chunks, ignore_index=True)
+#     dfTest = pd.concat(test_data_chunks, ignore_index=True)
+#     print_t("   feature_dict generating ...")
+#     fd = FeatureDictionary(dfTrain=dfTrain, dfTest=dfTest,numeric_cols=list(dfTrain.select_dtypes(include=['float64', 'int64'], exclude=None).columns))
+#     return dfTrain,dfTest,fd
 
 def parse(input_data,fd):
     dfi = input_data.copy().drop(columns=['target'])
@@ -206,13 +207,15 @@ print_t("params:")
 for k,v in dfm_params_local.items():
     print_t("   %s : %s" % (str(k), str(v)))
 print_t("loading data-generator")
-path="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
+# path_train= "/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
+path_train = "/home/zhoutong/data/train.txt"
 # Xi_train = _get_Xi_reader(path)
 # Xv_train = _get_Xv_reader(path)
 # y_train = _get_y_reader(path)
 
 print_t("loading valid data")
-path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
+# path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
+path_valid = "/home/zhoutong/data/valid.txt"
 Xi_valid, Xv_valid, y_valid = _get_valid(path_valid)
 
 # init a DeepFM model
@@ -225,7 +228,7 @@ dfm_local = DeepFM(**dfm_params_local)
 # fit a DeepFM model
 print_t("fitting ...")
 time_b = time.time()
-dfm_local.fit(train_data_path=path, Xi_valid=Xi_valid,Xv_valid=Xv_valid,y_valid=y_valid)
+dfm_local.fit(train_data_path=path_train, Xi_valid=Xi_valid, Xv_valid=Xv_valid, y_valid=y_valid)
 time_e = time.time()
 print_t("time elapse : %s s" % (time_e-time_b))
 
@@ -238,6 +241,48 @@ print_t("verify...")
 result = dfm_local.evaluate(Xi_valid, Xv_valid, y_valid)
 print_t("   " + str(result))
 
+
+sess=tf.Session()
+graph = tf.get_default_graph()
+ckpt_path = dfm_params_local.get("dfm_params_local")+"/model_batch_cnt-%s.ckpt" % 0
+meta_path = ckpt_path+".meta"
+# 恢复网络图; 可以手工用python一个个创建,也可以如下用import_meta_graph导入保存过的网络
+saver = tf.train.import_meta_graph(meta_path)
+# 载入参数; 注意网络保存时,占位符(tf.placeholder)是不会被保存的
+saver.restore(sess,ckpt_path)
+# 使用参数Tensor的名字引用它; Tensor names must be of the form "<op_name>:<output_index>".
+embedding = graph.get_tensor_by_name("feature_embeddings:0")
+print("embedding的值是",sess.run(embedding))
+
+# 获取placeholder的结构
+feat_index = graph.get_tensor_by_name("feat_index:0")
+feat_value = graph.get_tensor_by_name("feat_value:0")
+label = graph.get_tensor_by_name("label:0")
+dropout_keep_fm = graph.get_tensor_by_name("dropout_keep_fm:0")
+dropout_keep_deep = graph.get_tensor_by_name("dropout_keep_deep:0")
+train_phase = graph.get_tensor_by_name("train_phase:0")
+out = graph.get_tensor_by_name("out:0")
+feed_dict = {feat_index: Xi_valid,
+             feat_value: Xv_valid,
+             label: y_valid,
+             dropout_keep_fm: [1.0] * len(dfm_params_local.get('dropout_fm')),
+             dropout_keep_deep: [1.0] * len(dfm_params_local.get('dropout_deep')),
+             train_phase: False}
+sess.run(out, feed_dict=feed_dict)
+
+
+# 查询变量名称和值,但这个和上面的graph.get_tensor_by_name不一样,原因不明：
+from tensorflow.python import pywrap_tensorflow
+reader = pywrap_tensorflow.NewCheckpointReader(ckpt_path)
+var_to_shape_map = reader.get_variable_to_shape_map()
+var_to_dtypes_map = reader.get_variable_to_dtype_map()
+# Print tensor name and values
+print("变量及其shape:")
+for key,shape in var_to_shape_map.items(): print(key,shape)
+print("变量及其类型:")
+for key,shape in var_to_dtypes_map.items(): print(key,shape)
+print("获取某个变量的值")
+for key in var_to_shape_map: print("\n", key, "\n", reader.get_tensor(key))
 
 
 

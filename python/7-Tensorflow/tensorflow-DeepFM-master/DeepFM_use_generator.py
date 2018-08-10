@@ -6,6 +6,10 @@ Reference:
     Huifeng Guo, Ruiming Tang, Yunming Yey, Zhenguo Li, Xiuqiang He.
 """
 
+######
+# scp /Users/zac/5-Algrithm/python/7-Tensorflow/tensorflow-DeepFM-master/DeepFM_use_generator.py 10.10.16.15:/data/houcunyue/zhoutong/python3/lib/python3.6/site-packages/DeepFM_use_generator.py
+# 使用generator获取数据的方式。 单机。 定义了self.out的name="out"
+######
 import numpy as np
 import tensorflow as tf
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -27,7 +31,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
                  verbose=False, random_seed=2016,
                  use_fm=True, use_deep=True,
                  loss_type="logloss", eval_metric=roc_auc_score,
-                 l2_reg=0.0, greater_is_better=True):
+                 l2_reg=0.0, greater_is_better=True,save_path = None):
         assert (use_fm or use_deep)
         assert loss_type in ["logloss", "mse"], \
             "loss_type can be either 'logloss' for classification task or 'mse' for regression task"
@@ -58,7 +62,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.eval_metric = eval_metric
         self.greater_is_better = greater_is_better
         self.train_result, self.valid_result = [], []
-
+        self.save_path = save_path
         self._init_graph()
 
 
@@ -120,7 +124,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 concat_input = tf.concat([self.y_first_order, self.y_second_order], axis=1)
             elif self.use_deep:
                 concat_input = self.y_deep
-            self.out = tf.add(tf.matmul(concat_input, self.weights["concat_projection"]), self.weights["concat_bias"])
+            self.out = tf.add(tf.matmul(concat_input, self.weights["concat_projection"]), self.weights["concat_bias"], name="out")
 
             # loss
             if self.loss_type == "logloss":
@@ -328,6 +332,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
                     if batch_cnt % 1000 == 0:
                         train_result = self.evaluate(Xi_batch,Xv_batch,y_batch)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
+                        if self.save_path!=None:
+                            self.saver.save(sess=self.sess,save_path=self.save_path+"/model_batch_cnt-%s.ckpt" % batch_cnt)
                         print(now+": "+"[epoch:%d] [batch:%d] train-result=%.4f [%.1f s]" % (epoch + 1, batch_cnt, train_result, time() - t1))
                     if batch_cnt % 10000 == 0:
                         train_result = self.evaluate(Xi_valid,Xv_valid,y_valid)

@@ -36,7 +36,14 @@ numeric_columns = list(data_ori.select_dtypes(include=['float64','int64']).colum
 all_descriptions = list(data_ori.drop_duplicates(['rule'],keep='first',inplace=False)['rule'])
 for i in all_descriptions[:20]:
 	target_df = data_ori[data_ori['rule'] == i].sort_values(by=['dt'])
-	target_df.plot(figsize=(14,6),sharex=True,fontsize=7,grid=True,subplots=True,layout=(3,3),title=i,x='dt',y=numeric_columns)
+	target_df.plot(figsize=(14,6),
+				   sharex=True,
+				   fontsize=7,
+				   grid=True,
+				   subplots=True,
+				   layout=(3,3),
+				   title=i,
+				   x='dt',y=numeric_columns)
 	plt.show()
 
 

@@ -8,6 +8,7 @@ Reference:
 
 ######
 # scp /Users/zac/5-Algrithm/python/7-Tensorflow/tensorflow-DeepFM-master/DeepFM_use_generator.py 10.10.16.15:/data/houcunyue/zhoutong/python3/lib/python3.6/site-packages/DeepFM_use_generator.py
+# scp /Users/zac/5-Algrithm/python/7-Tensorflow/tensorflow-DeepFM-master/DeepFM_use_generator.py 192.168.0.253:/home/zhoutong/python3/lib/python3.6/site-packages/DeepFM_use_generator.py
 # 使用generator获取数据的方式。 单机。 定义了self.out的name="out"
 ######
 import numpy as np
@@ -18,7 +19,8 @@ from time import time
 import time as ori_time
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 from yellowfin import YFOptimizer
-
+import json
+from itertools import islice
 
 class DeepFM(BaseEstimator, TransformerMixin):
     def __init__(self, feature_size, field_size,
@@ -84,8 +86,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             self.weights = self._initialize_weights()
 
             # model
-            self.embeddings = tf.nn.embedding_lookup(self.weights["feature_embeddings"],
-                                                             self.feat_index)  # None * F * K
+            self.embeddings = tf.nn.embedding_lookup(self.weights["feature_embeddings"],self.feat_index)  # None * F * K
             feat_value = tf.reshape(self.feat_value, shape=[-1, self.field_size, 1])
             self.embeddings = tf.multiply(self.embeddings, feat_value)
 
@@ -239,14 +240,6 @@ class DeepFM(BaseEstimator, TransformerMixin):
         end = end if end < len(y) else len(y)
         return Xi[start:end], Xv[start:end], [[y_] for y_ in y[start:end]]
 
-    def get_batch_from_generator(self, Xi, Xv, y, batch_size):
-        Xi_,Xv_,y_=([] for _ in range(3))
-        for _ in range(batch_size):
-            Xi_.append(Xi.__next__())
-            Xv_.append(Xv.__next__())
-            y_.append(y.__next__())
-        return Xi_,Xv_,y_
-
     # shuffle three lists simutaneously
     def shuffle_in_unison_scary(self, a, b, c):
         rng_state = np.random.get_state()
@@ -268,7 +261,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         return loss
 
 
-    def fit(self, train_data_path, Xi_valid=None, Xv_valid=None, y_valid=None,
+    def fit(self, data_generator, Xi_valid=None, Xv_valid=None, y_valid=None,
             early_stopping=False, refit=False):
         """
         :param Xi_train_generator: [[ind1_1, ind1_2, ...], [ind2_1, ind2_2, ...], ..., [indi_1, indi_2, ..., indi_j, ...], ...]
@@ -285,39 +278,13 @@ class DeepFM(BaseEstimator, TransformerMixin):
         :return: None
         """
         ########################################################################################################
-        # 修订: get_batch改为使用get_batch_from_generator
-        #      下半部分使用 refit 对 valid也进行额外的几次fit没有处理,暂时先不管它
+        # 修订:下半部分使用 refit 对 valid也进行额外的几次fit没有处理,暂时先不管它
         #      暂时把所有has_valid的部分都取消掉, 增加一行直接输出训练结果
         #      输出训练的auc也改为每个batch输出一次
         ########################################################################################################
         # has_valid = Xv_valid is not None
-        def _get_Xi_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    sparse_f = info[1]
-                    Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
-                    yield Xi
-
-        def _get_Xv_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    dense_f = info[0]
-                    Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13,13+26)]
-                    yield Xv
-
-        def _get_y_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    label = int(info[2])
-                    y = [label]
-                    yield y
         for epoch in range(self.epoch):
-            Xi_train_generator = _get_Xi_reader(train_data_path)
-            Xv_train_generator = _get_Xv_reader(train_data_path)
-            y_train_generator = _get_y_reader(train_data_path)
+            Xi_train_generator, Xv_train_generator, y_train_generator= data_generator.get_generator()
             t1 = time()
             # self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
             batch_cnt = 0
@@ -333,9 +300,12 @@ class DeepFM(BaseEstimator, TransformerMixin):
                         train_result = self.evaluate(Xi_batch,Xv_batch,y_batch)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
                         if self.save_path!=None:
-                            self.saver.save(sess=self.sess,save_path=self.save_path+"/model_batch_cnt-%s.ckpt" % batch_cnt)
+                            self.saver.save(sess=self.sess,save_path=self.save_path+"/model/model_batch_cnt-%s.ckpt" % batch_cnt)
                         print(now+": "+"[epoch:%d] [batch:%d] train-result=%.4f [%.1f s]" % (epoch + 1, batch_cnt, train_result, time() - t1))
                     if batch_cnt % 10000 == 0:
+                        with open(self.save_path+"/tmp/DeepFM_predict_result_%s-%s.json" % (epoch,batch_cnt),"w+") as f:
+                            y_str = ",".join(list(map(str, self.predict(Xi_valid,Xv_valid))))
+                            f.write(json.dumps(y_str))
                         train_result = self.evaluate(Xi_valid,Xv_valid,y_valid)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
                         print(now+": "+"[valid-evaluate] [epoch:%d] [batch:%d] train-result=%.4f [%.1f s]" % (epoch + 1, batch_cnt, train_result, time() - t1))

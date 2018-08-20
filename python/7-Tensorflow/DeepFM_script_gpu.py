@@ -9,8 +9,9 @@ import json
 import sys
 
 ########
-# 单机试运行 DeepFM模型: https://github.com/ChenglongChen/tensorflow-DeepFM
-# 使用 Criteo 数据集 391M, 0.8训练集, 0.2测试集
+# 单机试运行 GPU DeepFM模型: https://github.com/ChenglongChen/tensorflow-DeepFM
+# scp文件到 GPU 服务器
+#   scp /Users/zac/5-Algrithm/python/7-Tensorflow/DeepFM_script_gpu.py 192.168.0.253:/home/zhoutong/py_script
 ########
 
 class FeatureDictionary(object):
@@ -135,7 +136,7 @@ def _get_Xi_reader(path):
         for line in f:
             info = line.strip().split("\t")
             sparse_f = info[1]
-            Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
+            Xi = list(range(13)) + list(map(lambda x: 13+int(x), sparse_f.split(",")))
             yield Xi
 
 
@@ -169,7 +170,7 @@ def _get_valid(path):
         # i += 1
         info = line.strip().split("\t")
         # 这里,原始文件中离散特征是从1开始建立索引的,所以加上12,0~12分配给连续特征
-        idx_list = list(range(13)) + list(map(lambda x: 12 + int(x), info[1].split(",")))
+        idx_list = list(range(13)) + list(map(lambda x: 13 + int(x), info[1].split(",")))
         value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13, 13 + 26)]
         lalbel = int(info[2])
         Xi_valid.append(idx_list)
@@ -177,7 +178,7 @@ def _get_valid(path):
         y_valid.append([lalbel])
     return Xi_valid, Xv_valid, y_valid
 
-feature_dim  = 117580
+feature_dim  = 117581
 field_size = 39
 
 print_t("params:")

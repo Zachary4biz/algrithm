@@ -283,15 +283,9 @@ class DeepFM(BaseEstimator, TransformerMixin):
         return loss
 
 
-    def fit(self, train_data_path, Xi_valid=None, Xv_valid=None, y_valid=None,
+    def fit(self, data_generator, Xi_valid=None, Xv_valid=None, y_valid=None,
             early_stopping=False, refit=False):
         """
-        :param Xi_train_generator: [[ind1_1, ind1_2, ...], [ind2_1, ind2_2, ...], ..., [indi_1, indi_2, ..., indi_j, ...], ...]
-                         indi_j is the feature index of feature field j of sample i in the training set
-        :param Xv_train_generator: [[val1_1, val1_2, ...], [val2_1, val2_2, ...], ..., [vali_1, vali_2, ..., vali_j, ...], ...]
-                         vali_j is the feature value of feature field j of sample i in the training set
-                         vali_j can be either binary (1/0, for binary/categorical features) or float (e.g., 10.24, for numerical features)
-        :param y_train_generator: label of each sample in the training set
         :param Xi_valid: list of list of feature indices of each sample in the validation set
         :param Xv_valid: list of list of feature values of each sample in the validation set
         :param y_valid: label of each sample in the validation set
@@ -306,35 +300,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
         #      输出训练的auc也改为每个batch输出一次
         ########################################################################################################
         # has_valid = Xv_valid is not None
-        def _get_Xi_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    sparse_f = info[1]
-                    Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
-                    yield Xi
 
-        def _get_Xv_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    dense_f = info[0]
-                    Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13,13+26)]
-                    yield Xv
-
-        def _get_y_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    label = int(info[2])
-                    y = [label]
-                    yield y
         for epoch in range(self.epoch):
-            Xi_train_generator = _get_Xi_reader(train_data_path)
-            Xv_train_generator = _get_Xv_reader(train_data_path)
-            y_train_generator = _get_y_reader(train_data_path)
+            Xi_train_generator, Xv_train_generator, y_train_generator = data_generator.get_train_generator()
             t1 = time()
-            # self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
             batch_cnt = 0
             while True:
                 Xi_batch,Xv_batch,y_batch=([] for _ in range(3))

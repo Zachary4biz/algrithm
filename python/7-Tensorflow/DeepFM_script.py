@@ -11,7 +11,8 @@ import sys
 
 ########
 # 单机试运行 DeepFM模型: https://github.com/ChenglongChen/tensorflow-DeepFM
-# 使用 Criteo 数据集 391M, 0.8训练集, 0.2测试集
+# scp文件到yf测试集群
+#   scp /Users/zac/5-Algrithm/python/7-Tensorflow/DeepFM_script.py 10.10.16.15:/data/houcunyue/zhoutong/py_script/
 ########
 def print_t(param):
     sys.stdout.flush()
@@ -136,81 +137,73 @@ def parse_from_cunyue(path="/data/houcunyue/soft/paddle-models/deep_fm/data/trai
 # print_t("loading data")
 # Xi_train,Xv_train,y_train, Xi_valid,Xv_valid,y_valid,feature_dim,field_size = parse_from_cunyue()
 
+class DataGenerator(object):
+    def __init__(self, train_path, valid_path):
+        self.train_path = train_path
+        self.valid_path = valid_path
+    def get_train_generator(self):
+        return self._get_Xi_reader(self.train_path),self._get_Xv_reader(self.train_path),self._get_y_reader(self.train_path)
+    def get_valid(self):
+        return self._get_valid(self.valid_path)
+    @staticmethod
+    def _get_Xi_reader(reader_path):
+            with open(reader_path, "r") as f:
+                for line in f:
+                    info = line.strip().split("\t")
+                    sparse_f = info[1]
+                    Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
+                    yield Xi
 
-def _get_Xi_reader(path):
-    with open(path,"r") as f:
-        for line in f:
+    @staticmethod
+    def _get_Xv_reader(reader_path):
+        with open(reader_path, "r") as f:
+            for line in f:
+                info = line.strip().split("\t")
+                dense_f = info[0]
+                Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
+                yield Xv
+    @staticmethod
+    def _get_y_reader(reader_path):
+        with open(reader_path, "r") as f:
+            for line in f:
+                info = line.strip().split("\t")
+                label = int(info[2])
+                y = [label]
+                yield y
+    @staticmethod
+    def _get_valid(path):
+        Xi_v, Xv_v, y_v = ([] for _ in range(3))
+        with open(path, "r") as f:
+            data = f.readlines()
+        for line in data:
             info = line.strip().split("\t")
-            sparse_f = info[1]
-            Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
-            yield Xi
-
-
-def _get_Xv_reader(path):
-    with open(path, "r") as f:
-        for line in f:
-            info = line.strip().split("\t")
-            dense_f = info[0]
-            Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
-            yield Xv
-
-def _get_y_reader(path):
-    with open(path, "r") as f:
-        for line in f:
-            info = line.strip().split("\t")
-            label = int(info[2])
-            y = [label]
-            yield y
-
-
-def _get_valid(path):
-    Xi_valid, Xv_valid, y_valid = ([] for _ in range(3))
-    with open(path, "r") as f:
-        data = f.readlines()
-    # i = 0
-    for line in data:
-        # sys.stdout.write(" "*30 + "\r")
-        # sys.stdout.flush()
-        # sys.stdout.write("%s/4583398" % i)
-        # sys.stdout.flush()
-        # i += 1
-        info = line.strip().split("\t")
-        # 这里,原始文件中离散特征是从1开始建立索引的,所以加上12,0~12分配给连续特征
-        idx_list = list(range(13)) + list(map(lambda x: 12 + int(x), info[1].split(",")))
-        value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13, 13 + 26)]
-        lalbel = int(info[2])
-        Xi_valid.append(idx_list)
-        Xv_valid.append(value_list)
-        y_valid.append([lalbel])
-    return Xi_valid, Xv_valid, y_valid
-
-feature_dim  = 117580
-field_size = 39
+            idx_list = list(range(13)) + list(map(lambda x: 12 + int(x), info[1].split(",")))
+            value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13, 13 + 26)]
+            lalbel = int(info[2])
+            Xi_v.append(idx_list)
+            Xv_v.append(value_list)
+            y_v.append([lalbel])
+        return Xi_v, Xv_v, y_v
 
 print_t("params:")
 for k,v in dfm_params_local.items():
     print_t("   %s : %s" % (str(k), str(v)))
-print_t("loading data-generator")
-path="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
-# Xi_train = _get_Xi_reader(path)
-# Xv_train = _get_Xv_reader(path)
-# y_train = _get_y_reader(path)
+path_train="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
+path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
+data_generator = DataGenerator(train_path=path_train, valid_path=path_valid)
 
 print_t("loading valid data")
-path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
-Xi_valid, Xv_valid, y_valid = _get_valid(path_valid)
+Xi_valid, Xv_valid, y_valid = data_generator.get_valid()
 
 # init a DeepFM model
-# dfm_params_local["feature_size"] = feature_dict.feat_dim
-# dfm_params_local["field_size"] = len(Xi_train[0])
-dfm_params_local["feature_size"] = feature_dim
-dfm_params_local["field_size"] = field_size
+dfm_params_local["feature_size"] = 117580
+dfm_params_local["field_size"] = 39
 dfm_local = DeepFM(**dfm_params_local)
 
 # fit a DeepFM model
 print_t("fitting ...")
 time_b = time.time()
-dfm_local.fit(train_data_path=path, Xi_valid=Xi_valid,Xv_valid=Xv_valid,y_valid=y_valid)
+dfm_local.fit(data_generator=data_generator, Xi_valid=Xi_valid,Xv_valid=Xv_valid,y_valid=y_valid)
 time_e = time.time()
 print_t("time elapse : %s s" % (time_e-time_b))
 

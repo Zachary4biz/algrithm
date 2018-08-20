@@ -2,8 +2,7 @@
 import tensorflow as tf
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import log_loss
-from DataReader import FeatureDictionary
-from DeepFM_use_generator import DeepFM
+from DeepFM_use_generator_gpu import DeepFM
 import pandas as pd
 import time
 import json
@@ -13,6 +12,49 @@ import sys
 # 单机试运行 DeepFM模型: https://github.com/ChenglongChen/tensorflow-DeepFM
 # 使用 Criteo 数据集 391M, 0.8训练集, 0.2测试集
 ########
+
+class FeatureDictionary(object):
+    def __init__(self, trainfile=None, testfile=None,
+                 dfTrain=None, dfTest=None, numeric_cols=[], ignore_cols=[]):
+        assert not ((trainfile is None) and (dfTrain is None)), "trainfile or dfTrain at least one is set"
+        assert not ((trainfile is not None) and (dfTrain is not None)), "only one can be set"
+        assert not ((testfile is None) and (dfTest is None)), "testfile or dfTest at least one is set"
+        assert not ((testfile is not None) and (dfTest is not None)), "only one can be set"
+        self.trainfile = trainfile
+        self.testfile = testfile
+        self.dfTrain = dfTrain
+        self.dfTest = dfTest
+        self.numeric_cols = numeric_cols
+        self.ignore_cols = ignore_cols
+        self.gen_feat_dict()
+
+    def gen_feat_dict(self):
+        if self.dfTrain is None:
+            dfTrain = pd.read_csv(self.trainfile)
+        else:
+            dfTrain = self.dfTrain
+        if self.dfTest is None:
+            dfTest = pd.read_csv(self.testfile)
+        else:
+            dfTest = self.dfTest
+        df = pd.concat([dfTrain, dfTest])
+        self.feat_dict = {}
+        tc = 0
+        for col in df.columns:
+            if col in self.ignore_cols:
+                continue
+            if col in self.numeric_cols:
+                # map to a single index
+                self.feat_dict[col] = tc
+                tc += 1
+            else:
+                us = df[col].unique()
+                self.feat_dict[col] = dict(zip(us, range(tc, len(us)+tc)))
+                tc += len(us)
+        self.feat_dim = tc
+
+
+
 def print_t(param):
     sys.stdout.flush()
     now = time.strftime("|%Y-%m-%d %H:%M:%S| ", time.localtime(time.time()))
@@ -87,55 +129,6 @@ def parse(input_data,fd):
     Xv = dfv.values.tolist()
     return Xi,Xv,y
 
-# print_t("prepare")
-# train_data,test_data,feature_dict = prepare()
-#
-# print_t("parse for train")
-# Xi_train,Xv_train,y_train = parse(train_data,fd=feature_dict)
-# print_t("parse for valid")
-# Xi_valid,Xv_valid,y_valid = parse(test_data,fd=feature_dict)
-
-def parse_from_cunyue(path="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"):
-    Xi_total, Xv_total, y_total = ([] for _ in range(3))
-
-    holder = "41257219*1+1"
-    # holder = "10*10000"
-    i = 0
-    print_t("   reading ...")
-    with open(path,"r") as f:
-        data = f.readlines()
-    print_t("   parsing ...")
-    for line in data:
-        if i >= eval(holder) : break
-        # sys.stdout.write(" "*30 + "\r")
-        # sys.stdout.flush()
-        # sys.stdout.write("%s/(%s)" % (i,holder))
-        # sys.stdout.flush()
-        i += 1
-        info = list(map(lambda x:x.strip(), line.split("\t")))
-        # 这里,原始文件中离散特征是从1开始建立索引的,所以加上12,0~12分配给连续特征
-        idx_list = list(range(13)) + list(map(lambda x: 12+int(x), info[1].split(",")))
-        value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13,13+26)]
-        lalbel = int(info[2])
-        Xi_total.append(idx_list)
-        Xv_total.append(value_list)
-        y_total.append(lalbel)
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-    from itertools import chain
-    feature_dim = max(list(chain(*Xi_total)))+1
-    print_t("   feature_dim:%s" % feature_dim)
-    field_size = len(Xi_total[0])
-    print_t("   field_size:%s" % field_size)
-    cut_idx = int(0.8*len(Xi_total))
-    print_t("   allocation ...")
-    Xi_, Xv_, y_ = (target[cut_idx:] for target in [Xi_total, Xv_total, y_total])
-    Xi, Xv, y = (target[:cut_idx] for target in [Xi_total, Xv_total, y_total])
-    return Xi,Xv,y,Xi_,Xv_,y_,feature_dim,field_size
-
-# print_t("loading data")
-# Xi_train,Xv_train,y_train, Xi_valid,Xv_valid,y_valid,feature_dim,field_size = parse_from_cunyue()
-
 
 def _get_Xi_reader(path):
     with open(path,"r") as f:
@@ -191,13 +184,13 @@ print_t("params:")
 for k,v in dfm_params_local.items():
     print_t("   %s : %s" % (str(k), str(v)))
 print_t("loading data-generator")
-path="/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
+path_train= "/home/houcunyue/train.txt"
 # Xi_train = _get_Xi_reader(path)
 # Xv_train = _get_Xv_reader(path)
 # y_train = _get_y_reader(path)
 
 print_t("loading valid data")
-path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
+path_valid = "/home/houcunyue/valid.txt"
 Xi_valid, Xv_valid, y_valid = _get_valid(path_valid)
 
 # init a DeepFM model
@@ -210,7 +203,7 @@ dfm_local = DeepFM(**dfm_params_local)
 # fit a DeepFM model
 print_t("fitting ...")
 time_b = time.time()
-dfm_local.fit(train_data_path=path, Xi_valid=Xi_valid,Xv_valid=Xv_valid,y_valid=y_valid)
+dfm_local.fit(train_data_path=path_train, Xi_valid=Xi_valid, Xv_valid=Xv_valid, y_valid=y_valid)
 time_e = time.time()
 print_t("time elapse : %s s" % (time_e-time_b))
 

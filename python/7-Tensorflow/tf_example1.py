@@ -77,3 +77,14 @@ plt.show()
 
 # terminal输入如下，可以在返回的url中查看tensorboard
 # tensorboard --logdir logs
+
+from tensorflow.python.client import device_lib
+device_lib.list_local_devices()
+import tensorflow as tf
+with tf.device('/gpu:0'):
+	a = tf.constant([1, 2, 3, 4, 5, 6], shape=[2, 3], name='a')
+	b = tf.constant([1, 2, 3, 4, 5, 6], shape=[3, 2], name='b')
+	c = tf.matmul(a, b)
+
+with tf.Session() as sess:
+	print(sess.run(c))

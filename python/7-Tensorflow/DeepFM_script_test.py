@@ -2,7 +2,7 @@
 import tensorflow as tf
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import log_loss
-from DeepFM_use_generator import DeepFM
+from DeepFM_use_generator_test import DeepFM
 import time
 import sys
 from itertools import islice
@@ -31,28 +31,54 @@ class DataGenerator(object):
             return self._get_Xi_reader(self.path), self._get_Xv_reader(self.path), self._get_y_reader(self.path)
     def get_libsvm__generator(self):
         return self._libsvm_get_Xi_reader(self.path), self._libsvm_get_Xv_reader(self.path), self._libsvm_get_y_reader(self.path)
+    def get_libsvm_three_kind_feature_generator(self):
+        return self._libsvm_get_three_kind_feature_reader(self.path)
     def get_valid(self):
-        return self._get_valid(self.valid_path)
+        if self.use_libsvm:
+            return self._libsvm_get_valid(self.valid_path)
+        else:
+            return self._get_valid(self.valid_path)
     @staticmethod
     def _libsvm_get_Xi_reader(reader_path):
         with open(reader_path,"r") as f:
             for line in f:
-                feature = line.strip().split(" ")[1:]
+                feature = " ".join(line.strip().split("\t")[1:]).split(" ")
                 Xi = list(map(lambda x: x.split(":")[0], feature))
                 yield Xi
     @staticmethod
     def _libsvm_get_Xv_reader(reader_path):
         with open(reader_path,"r") as f:
             for line in f:
-                label = line.strip().split(" ")[0]
-                yield label
+                feature = " ".join(line.strip().split("\t")[1:]).split(" ")
+                Xv = list(map(lambda x: x.split(":")[1], feature))
+                yield Xv
     @staticmethod
     def _libsvm_get_y_reader(reader_path):
         with open(reader_path,"r") as f:
             for line in f:
+                label = line.strip().split("\t")[0]
+                yield label
+    @staticmethod
+    def _libsvm_get_three_kind_feature_reader(reader_path):
+        with open(reader_path,"r") as f:
+            for line in f:
+                numeric_feature = line.strip().split("\t")[1]
+                category_feature = line.strip().split("\t")[2]
+                app_feature = line.strip().split("\t")[3]
+                yield numeric_feature,category_feature,app_feature
+    @staticmethod
+    def _libsvm_get_valid(path):
+        Xi_valid, Xv_valid, y_valid = ([] for _ in range(3))
+        with open(path,"r") as f:
+            for line in f:
                 feature = line.strip().split(" ")[1:]
+                label = line.strip().split(" ")[0]
                 Xv = list(map(lambda x: x.split(":")[1], feature))
-                yield Xv
+                Xi = list(map(lambda x: x.split(":")[0], feature))
+                Xi_valid.append(Xi)
+                Xv_valid.append(Xv)
+                y_valid.append([label])
+        return Xi_valid, Xv_valid, y_valid
     @staticmethod
     def _get_Xi_reader(reader_path):
             with open(reader_path, "r") as f:
@@ -142,7 +168,7 @@ dfm_params_local_fm = {
     "epoch": 30,
     "batch_size": 1024,
     "learning_rate": 0.0001,
-    "optimizer_type": "yellowfin",
+    "optimizer_type": "adam",
     "batch_norm": 1,
     "batch_norm_decay": 0.995,
     "l2_reg": 0.01,
@@ -156,10 +182,10 @@ dfm_params_local_fm = {
 dfm_params_local_deepfm = {
     "use_fm": True,
     "use_deep": True,
-    "embedding_size": 10,
+    "embedding_size": 8,
     "dropout_fm": [1.0, 1.0],
-    "deep_layers": [400, 400, 400],
-    "dropout_deep": [1.0, 1.0, 1.0, 1.0],
+    "deep_layers": [32, 32],
+    "dropout_deep": [0.5, 0.5],
     "deep_layers_activation": tf.nn.relu,
     "epoch": 30,
     "batch_size": 1024,
@@ -172,13 +198,21 @@ dfm_params_local_deepfm = {
     "eval_metric": roc_auc_score,
     "random_seed": 2017,
     # "save_path": "/home/zhoutong/data/deep_fm",
-    "save_path": "/data/houcunyue/zhoutong/data/deep_fm_from_datanode004"
+    "save_path": "/data/houcunyue/zhoutong/data/deep_fm_from_%s" % (time.time())
 }
 
-dfm_params_local = dfm_params_local_fm
-
-feature_dim  = 117581
+dfm_params_local = dfm_params_local_deepfm
+use_libsvm=False
+path_train= "/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
+path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
+# path_train = "/Users/zac/train.txt"
+# path_valid = "/Users/zac/test.txt"
+feature_dim = 117581
 field_size = 39
+############# apus_ad_0805 的特征
+# use_libsvm=True
+# path_train= "/data/houcunyue/zhoutong/data/apus_ad/ad_feature_libsvm/ad_feature_0805_train.libsvm"
+# path_valid = "/data/houcunyue/zhoutong/data/apus_ad/ad_feature_libsvm/ad_feature_0805_test.libsvm"
 # feature_dim= 937225
 # field_size = 17
 
@@ -186,9 +220,10 @@ print_t("params:")
 for k,v in dfm_params_local.items():
     print_t("   %s : %s" % (str(k), str(v)))
 print_t("loading data-generator")
-path_train= "/data/houcunyue/soft/paddle-models/deep_fm/data/train.txt"
-path_valid = "/data/houcunyue/soft/paddle-models/deep_fm/data/valid.txt"
-data_generator = DataGenerator(path=path_train,valid_path=path_valid)
+
+path_train_local = "/Users/zac/Desktop/apus_ad_libsvm.txt"
+path_valid_local = "/Users/zac/Desktop/apus_ad_libsvm_valid.txt"
+data_generator = DataGenerator(path=path_train_local,valid_path=path_valid_local,use_libsvm=True)
 print_t("loading valid data")
 Xi_valid, Xv_valid, y_valid = data_generator.get_valid()
 

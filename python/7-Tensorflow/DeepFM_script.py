@@ -151,7 +151,7 @@ class DataGenerator(object):
                 for line in f:
                     info = line.strip().split("\t")
                     sparse_f = info[1]
-                    Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
+                    Xi = list(range(13)) + list(map(lambda x: 13 + int(x), sparse_f.split(",")))
                     yield Xi
 
     @staticmethod
@@ -177,11 +177,13 @@ class DataGenerator(object):
             data = f.readlines()
         for line in data:
             info = line.strip().split("\t")
-            idx_list = list(range(13)) + list(map(lambda x: 12 + int(x), info[1].split(",")))
-            value_list = list(map(lambda x: float(x), info[0].split(","))) + [1 for _ in range(13, 13 + 26)]
+            dense_f = info[0]
+            sparse_f = info[1]
+            Xi = list(range(13)) + list(map(lambda x: 13 + int(x), sparse_f.split(",")))
+            Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
             lalbel = int(info[2])
-            Xi_v.append(idx_list)
-            Xv_v.append(value_list)
+            Xi_v.append(Xi)
+            Xv_v.append(Xv)
             y_v.append([lalbel])
         return Xi_v, Xv_v, y_v
 
@@ -196,7 +198,7 @@ print_t("loading valid data")
 Xi_valid, Xv_valid, y_valid = data_generator.get_valid()
 
 # init a DeepFM model
-dfm_params_local["feature_size"] = 117580
+dfm_params_local["feature_size"] = 117581
 dfm_params_local["field_size"] = 39
 dfm_local = DeepFM(**dfm_params_local)
 

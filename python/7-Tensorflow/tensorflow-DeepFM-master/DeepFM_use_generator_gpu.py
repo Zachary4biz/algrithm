@@ -69,7 +69,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
 
     def _init_graph(self):
         self.graph = tf.Graph()
-        with self.graph.as_default():
+        with self.graph.as_default(), tf.device("/gpu:0"):
 
             tf.set_random_seed(self.random_seed)
 
@@ -88,39 +88,48 @@ class DeepFM(BaseEstimator, TransformerMixin):
             self.embeddings = tf.nn.embedding_lookup(self.weights["feature_embeddings"],
                                                              self.feat_index)  # None * F * K
             feat_value = tf.reshape(self.feat_value, shape=[-1, self.field_size, 1])
-            self.embeddings = tf.multiply(self.embeddings, feat_value)
+            self.embeddings = tf.multiply(self.embeddings, feat_value)  # ---------- first order term ----------
+            self.y_first_order = tf.nn.embedding_lookup(self.weights["feature_bias"], self.feat_index)  # None * F * 1
+            self.y_first_order = tf.reduce_sum(tf.multiply(self.y_first_order, feat_value), 2)  # None * F
+            self.y_first_order = tf.nn.dropout(self.y_first_order, self.dropout_keep_fm[0])  # None * F
 
-            with tf.device("/cpu:0"):
-                # ---------- first order term ----------
-                self.y_first_order = tf.nn.embedding_lookup(self.weights["feature_bias"], self.feat_index) # None * F * 1
-                self.y_first_order = tf.reduce_sum(tf.multiply(self.y_first_order, feat_value), 2)  # None * F
-                self.y_first_order = tf.nn.dropout(self.y_first_order, self.dropout_keep_fm[0]) # None * F
+            # ---------- second order term ---------------
+            # sum_square part
+            self.summed_features_emb = tf.reduce_sum(self.embeddings, 1)  # None * K
+            self.summed_features_emb_square = tf.square(self.summed_features_emb)  # None * K
 
-                # ---------- second order term ---------------
-                # sum_square part
-                self.summed_features_emb = tf.reduce_sum(self.embeddings, 1)  # None * K
-                self.summed_features_emb_square = tf.square(self.summed_features_emb)  # None * K
+            # square_sum part
+            self.squared_features_emb = tf.square(self.embeddings)
+            self.squared_sum_features_emb = tf.reduce_sum(self.squared_features_emb, 1)  # None * K
 
-                # square_sum part
-                self.squared_features_emb = tf.square(self.embeddings)
-                self.squared_sum_features_emb = tf.reduce_sum(self.squared_features_emb, 1)  # None * K
-
-                # second order
-                self.y_second_order = 0.5 * tf.subtract(self.summed_features_emb_square, self.squared_sum_features_emb)  # None * K
-                self.y_second_order = tf.nn.dropout(self.y_second_order, self.dropout_keep_fm[1])  # None * K
+            # second order
+            self.y_second_order = 0.5 * tf.subtract(self.summed_features_emb_square,
+                                                    self.squared_sum_features_emb)  # None * K
+            self.y_second_order = tf.nn.dropout(self.y_second_order, self.dropout_keep_fm[1])  # None * K
 
 
             # ---------- Deep component ----------
+            # tower_grads = []
+            # TOWER_NAME = "tower"
+            # with tf.variable_scope(tf.get_variable_scope()):
+            #     for i in range(3):
+            #         with tf.device('/gpu:%d' % i):
+            #             with tf.name_scope('%s_%d' % (TOWER_NAME, i)) as scope:
+            #                 loss = tower_loss(scope)
             self.y_deep = tf.reshape(self.embeddings, shape=[-1, self.field_size * self.embedding_size]) # None * (F*K)
             self.y_deep = tf.nn.dropout(self.y_deep, self.dropout_keep_deep[0])
             for i in range(0, len(self.deep_layers)):
-                with tf.device("/gpu:%s" % i):
-                    self.y_deep = tf.add(tf.matmul(self.y_deep, self.weights["layer_%d" %i]), self.weights["bias_%d"%i]) # None * layer[i] * 1
-                    if self.batch_norm:
-                        self.y_deep = self.batch_norm_layer(self.y_deep, train_phase=self.train_phase, scope_bn="bn_%d" %i) # None * layer[i] * 1
-                    self.y_deep = self.deep_layers_activation(self.y_deep)
-                    self.y_deep = tf.nn.dropout(self.y_deep, self.dropout_keep_deep[1+i]) # dropout at each Deep layer
-
+                # None * layer[i] * 1
+                self.y_deep = tf.add(tf.matmul(self.y_deep, self.weights["layer_%d" % i]),
+                                     self.weights["bias_%d" % i])
+                if self.batch_norm:
+                    # None * layer[i] * 1
+                    self.y_deep = self.batch_norm_layer(self.y_deep,
+                                                        train_phase=self.train_phase,
+                                                        scope_bn="bn_%d" % i)
+                self.y_deep = self.deep_layers_activation(self.y_deep)
+                # dropout at each Deep layer
+                self.y_deep = tf.nn.dropout(self.y_deep,self.dropout_keep_deep[1 + i])
             # ---------- DeepFM ----------
             if self.use_fm and self.use_deep:
                 concat_input = tf.concat([self.y_first_order, self.y_second_order, self.y_deep], axis=1)

@@ -131,46 +131,22 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 # dropout at each Deep layer
                 self.y_deep = tf.nn.dropout(self.y_deep,self.dropout_keep_deep[1 + i])
             # ---------- DeepFM ----------
-            if self.use_fm and self.use_deep:
-                concat_input = tf.concat([self.y_first_order, self.y_second_order, self.y_deep], axis=1)
-            elif self.use_fm:
-                concat_input = tf.concat([self.y_first_order, self.y_second_order], axis=1)
-            elif self.use_deep:
-                concat_input = self.y_deep
-            with tf.device("/gpu:0"):
-                self.out = tf.add(tf.matmul(concat_input, self.weights["concat_projection"]), self.weights["concat_bias"])
+            concat_input = tf.concat([self.y_first_order, self.y_second_order, self.y_deep], axis=1)
+            self.out = tf.add(tf.matmul(concat_input, self.weights["concat_projection"]), self.weights["concat_bias"])
 
             # loss
-            if self.loss_type == "logloss":
-                self.out = tf.nn.sigmoid(self.out)
-                self.loss = tf.losses.log_loss(self.label, self.out)
-            elif self.loss_type == "mse":
-                self.loss = tf.nn.l2_loss(tf.subtract(self.label, self.out))
+            self.out = tf.nn.sigmoid(self.out)
+            self.loss = tf.losses.log_loss(self.label, self.out)
             # l2 regularization on weights
-            if self.l2_reg > 0:
-                self.loss += tf.contrib.layers.l2_regularizer(
-                    self.l2_reg)(self.weights["concat_projection"])
-                if self.use_deep:
-                    for i in range(len(self.deep_layers)):
-                        self.loss += tf.contrib.layers.l2_regularizer(
-                            self.l2_reg)(self.weights["layer_%d"%i])
-
-            # optimizer
-            if self.optimizer_type == "adam":
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,
+            # if self.l2_reg > 0:
+            #     self.loss += tf.contrib.layers.l2_regularizer(self.l2_reg)(self.weights["concat_projection"])
+            #     if self.use_deep:
+            #         for i in range(len(self.deep_layers)):
+            #             self.loss += tf.contrib.layers.l2_regularizer(
+            #                 self.l2_reg)(self.weights["layer_%d"%i])
+            # opt
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,
                                                         epsilon=1e-8).minimize(self.loss)
-            elif self.optimizer_type == "adagrad":
-                self.optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate,
-                                                           initial_accumulator_value=1e-8).minimize(self.loss)
-            elif self.optimizer_type == "gd":
-                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            elif self.optimizer_type == "momentum":
-                self.optimizer = tf.train.MomentumOptimizer(learning_rate=self.learning_rate, momentum=0.95).minimize(
-                    self.loss)
-            elif self.optimizer_type == "yellowfin":
-                self.optimizer = YFOptimizer(learning_rate=self.learning_rate, momentum=0.0).minimize(
-                    self.loss)
-
             # init
             self.saver = tf.train.Saver()
             init = tf.global_variables_initializer()

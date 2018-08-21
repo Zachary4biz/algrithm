@@ -15,6 +15,11 @@ import time as ori_time
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 from yellowfin import YFOptimizer
 
+###########
+# scp到GPU服务器
+#    scp /Users/zac/5-Algrithm/python/7-Tensorflow/tensorflow-DeepFM-master/DeepFM_use_generator_gpu.py 192.168.0.253:/home/zhoutong/python3/lib/python3.6/site-packages/
+#
+###########
 
 class DeepFM(BaseEstimator, TransformerMixin):
     def __init__(self, feature_size, field_size,
@@ -269,7 +274,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         return loss
 
 
-    def fit(self, train_data_path, Xi_valid=None, Xv_valid=None, y_valid=None,
+    def fit(self, data_generator, Xi_valid=None, Xv_valid=None, y_valid=None,
             early_stopping=False, refit=False):
         """
         :param Xi_train_generator: [[ind1_1, ind1_2, ...], [ind2_1, ind2_2, ...], ..., [indi_1, indi_2, ..., indi_j, ...], ...]
@@ -292,33 +297,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
         #      输出训练的auc也改为每个batch输出一次
         ########################################################################################################
         # has_valid = Xv_valid is not None
-        def _get_Xi_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    sparse_f = info[1]
-                    Xi = list(range(13)) + list(map(lambda x: 12+int(x), sparse_f.split(",")))
-                    yield Xi
-
-        def _get_Xv_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    dense_f = info[0]
-                    Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13,13+26)]
-                    yield Xv
-
-        def _get_y_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    label = int(info[2])
-                    y = [label]
-                    yield y
         for epoch in range(self.epoch):
-            Xi_train_generator = _get_Xi_reader(train_data_path)
-            Xv_train_generator = _get_Xv_reader(train_data_path)
-            y_train_generator = _get_y_reader(train_data_path)
+            Xi_train_generator, Xv_train_generator, y_train_generator = data_generator.get_train_generator()
             t1 = time()
             # self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
             batch_cnt = 0

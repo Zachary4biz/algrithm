@@ -20,44 +20,31 @@ class DataGenerator(object):
         self.train_path = train_path
         self.valid_path = valid_path
     def get_train_generator(self):
-        return self._get_Xi_reader(self.train_path),self._get_Xv_reader(self.train_path),self._get_y_reader(self.train_path)
+        return self._get_generator(self.train_path)
     def get_valid(self):
         return self._get_valid(self.valid_path)
     @staticmethod
-    def _get_Xi_reader(reader_path):
-            with open(reader_path, "r") as f:
-                for line in f:
-                    info = line.strip().split("\t")
-                    sparse_f = info[1]
-                    Xi = list(range(13)) + list(map(lambda x: 13 + int(x), sparse_f.split(",")))
-                    yield Xi
-
-    @staticmethod
-    def _get_Xv_reader(reader_path):
-        with open(reader_path, "r") as f:
+    def _get_generator(reader_path):
+        with open(reader_path, "r", encoding="utf-8") as f:
             for line in f:
                 info = line.strip().split("\t")
                 dense_f = info[0]
-                Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
-                yield Xv
-    @staticmethod
-    def _get_y_reader(reader_path):
-        with open(reader_path, "r") as f:
-            for line in f:
-                info = line.strip().split("\t")
+                sparse_f = info[1]
                 label = int(info[2])
+                Xi = list(range(13)) + list(map(lambda x: 13 + float(x), sparse_f.split(",")))
+                Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
                 y = [label]
-                yield y
+                yield [Xi, Xv, y]
     @staticmethod
     def _get_valid(path):
         Xi_v, Xv_v, y_v = ([] for _ in range(3))
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = f.readlines()
         for line in data:
             info = line.strip().split("\t")
             dense_f = info[0]
             sparse_f = info[1]
-            Xi = list(range(13)) + list(map(lambda x: 13 + int(x), sparse_f.split(",")))
+            Xi = list(range(13)) + list(map(lambda x: 13 + float(x), sparse_f.split(",")))
             Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
             lalbel = int(info[2])
             Xi_v.append(Xi)
@@ -81,7 +68,7 @@ dfm_params_local = {
     "dropout_deep": [1.0, 1.0, 1.0, 1.0],
     "deep_layers_activation": tf.nn.relu,
     "epoch": 30,
-    "batch_size": 1024,
+    "batch_size": 1024*3,
     "learning_rate": 0.001,
     "optimizer_type": "adam",
     "batch_norm": 1,
@@ -89,15 +76,16 @@ dfm_params_local = {
     "l2_reg": 0.01,
     "verbose": True,
     "eval_metric": roc_auc_score,
-    "random_seed": 2017
+    "random_seed": 2017,
+    "gpu_num":3
 }
 
 print_t("params:")
 for k,v in dfm_params_local.items():
     print_t("   %s : %s" % (str(k), str(v)))
 print_t("loading data-generator")
-path_train= "/home/houcunyue/train.txt"
-path_valid = "/home/houcunyue/valid.txt"
+path_train= "/home/zhoutong/data/train.txt"
+path_valid = "/home/zhoutong/data/valid.txt"
 data_generator = DataGenerator(train_path=path_train, valid_path=path_valid)
 Xi_valid, Xv_valid, y_valid = data_generator.get_valid()
 

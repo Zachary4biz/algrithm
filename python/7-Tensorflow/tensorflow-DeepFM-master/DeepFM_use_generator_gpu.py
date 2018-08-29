@@ -15,6 +15,7 @@ import time as ori_time
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 from yellowfin import YFOptimizer
 import math
+from tensorflow.python.client import timeline
 
 ###########
 # scp到GPU服务器
@@ -66,7 +67,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.train_result, self.valid_result = [], []
         # gpu个数
         self.gpu_num = gpu_num
-        self.payload_per_gpu = math.ceil(self.batch_size/self.gpu_num)
+        # self.payload_per_gpu = math.ceil(self.batch_size/self.gpu_num)
+        # timeline 工具的options和run_metadata
+        self.options = tf.RunOptions(trace_level = tf.RunOptions.FULL_TRACE)
+        self.run_metadata = tf.RunMetadata()
         # self.payload_per_gpu = self.batch_size # 在fit_batch中,每次取3个batch的数据
         self._init_graph()
 
@@ -129,8 +133,6 @@ class DeepFM(BaseEstimator, TransformerMixin):
 
     @staticmethod
     def average_gradients(tower_grads):
-        from tensorflow.python.framework import ops
-        print("average_gradients...")
         average_grads = []
         zip_target = list(zip(*tower_grads))
         for idx in range(len(zip_target)):
@@ -141,25 +143,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             v = grad_and_vars[0][1]
             grad_and_var = (grad, v)
             average_grads.append(grad_and_var)
-        print("运行过一次 average_gradients")
         return average_grads
-    # def average_gradients(tower_grads):
-    #     average_grads = []
-    #     for grad_and_vars in zip(*tower_grads):
-    #         # Note that each grad_and_vars looks like the following:
-    #         #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
-    #         grads = [g for g, _ in grad_and_vars]
-    #         # Average over the 'tower' dimension.
-    #         grad = tf.stack(grads, 0)
-    #         grad = tf.reduce_mean(grad, 0)
-    #
-    #         # Keep in mind that the Variables are redundant because they are shared
-    #         # across towers. So .. we will just return the first tower's pointer to
-    #         # the Variable.
-    #         v = grad_and_vars[0][1]
-    #         grad_and_var = (grad, v)
-    #         average_grads.append(grad_and_var)
-    #     return average_grads
 
 
     def _init_graph(self):
@@ -270,14 +254,27 @@ class DeepFM(BaseEstimator, TransformerMixin):
         feed_dict = {self.dropout_keep_fm: self.dropout_fm,
                     self.dropout_keep_deep: self.dropout_deep,
                     self.train_phase: True}
+        # 如果一个batch预计有1024*3个,出现最后一个batch只有1024个
+        # 那么这里用self.payload_per_gpu会导致只有第一个gpu有数据,后两个的输入都是空数组,直接报错
+        payload_per_gpu = math.ceil(min(len(Xi),self.batch_size)/self.gpu_num)
         for i in range(len(self.models)):
             tower_f_idxs, tower_f_vs, tower_labels, _, _, _ = self.models[i]
-            start_pos = i * self.payload_per_gpu
-            stop_pos = (i + 1) * self.payload_per_gpu
+            start_pos = i * payload_per_gpu
+            stop_pos = (i + 1) * payload_per_gpu
             feed_dict[tower_f_idxs] = Xi[start_pos:stop_pos]
             feed_dict[tower_f_vs] = Xv[start_pos:stop_pos]
             feed_dict[tower_labels] = y[start_pos:stop_pos]
-        loss, opt, train_summary = self.sess.run((self.loss, self.optimizer, self.merge_summary), feed_dict=feed_dict)
+        t = 2
+        if batch_cnt<= t :
+            loss, opt, train_summary = self.sess.run((self.loss, self.optimizer, self.merge_summary), options=self.options, run_metadata=self.run_metadata, feed_dict=feed_dict)
+            # create timeline object, and write it to a json file
+            fetched_timeline = timeline.Timeline(self.run_metadata.step_stats)
+            chrome_trace = fetched_timeline.generate_chrome_trace_format()
+            print(" writting timeline for batch_cnt:%d" % batch_cnt)
+            with open('timeline_for_first_%s_batch_criteo_data.json' % t, 'w') as f: f.write(chrome_trace)
+            print(" done.")
+        else:
+            loss, opt, train_summary = self.sess.run((self.loss, self.optimizer, self.merge_summary), feed_dict=feed_dict)
         self.writer.add_summary(train_summary,batch_cnt)
         return loss
 
@@ -323,10 +320,12 @@ class DeepFM(BaseEstimator, TransformerMixin):
                         train_result = self.evaluate(Xi_batch,Xv_batch,y_batch)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
                         print(now+": "+"[epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_result, time() - t1))
+                        t1 = time()
                     if batch_cnt % 3000 == 0:
+                        t2 = time()
                         train_result = self.evaluate(Xi_valid,Xv_valid,y_valid)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-                        print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_result, time() - t1))
+                        print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_result, time() - t2))
                 except StopIteration:
                     break
                 batch_cnt += 1
@@ -353,17 +352,13 @@ class DeepFM(BaseEstimator, TransformerMixin):
             feed_dict = {self.dropout_keep_fm: [1.0] * len(self.dropout_fm),
                         self.dropout_keep_deep: [1.0] * len(self.dropout_deep),
                         self.train_phase: False}
+            payload_per_gpu = math.ceil(len(Xi_batch)/self.gpu_num)
             for i in range(len(self.models)):
                 tower_f_idxs, tower_f_vs, tower_labels, _, _, _ = self.models[i]
-                start_pos = i * self.payload_per_gpu
-                stop_pos = (i + 1) * self.payload_per_gpu
+                start_pos = i * payload_per_gpu
+                stop_pos = (i + 1) * payload_per_gpu
                 feed_dict[tower_f_idxs] = Xi_batch[start_pos:stop_pos]
                 feed_dict[tower_f_vs] = Xv_batch[start_pos:stop_pos]
-                # feed_dict[tower_labels] = y[start_pos:stop_pos]
-            # print("reday to run self.out")
-            # for i in feed_dict:
-            #     if type(feed_dict[i])==list:
-            #         print(i, len(feed_dict[i]))
 
             batch_out = self.sess.run(self.out, feed_dict=feed_dict)
             if batch_index == 0:
@@ -386,27 +381,4 @@ class DeepFM(BaseEstimator, TransformerMixin):
         y_pred = self.predict(Xi, Xv)
         return self.eval_metric(y, y_pred)
 
-
-    # def evaluate_generator(self, Xi_generator, Xv_generator, y_generator):
-    #     import math
-    #     y = list(y_generator)
-    #     y_pred = []
-    #
-    #     while True:
-    #         try:
-    #             Xi.append(Xi_generator.__next__())
-    #             Xv.append(Xv_generator.__next__())
-    #         except StopIteration:
-    #             break
-    #
-    #     for _ in range(math.ceil(len(y)/each_iter_size)):
-    #         Xi,Xv= [],[]
-    #         for _ in range(each_iter_size):
-    #             try:
-    #                 Xi.append(Xi_generator.__next__())
-    #                 Xv.append(Xv_generator.__next__())
-    #             except StopIteration:
-    #                 break
-    #         y_pred = y_pred+self.predict(Xi,Xv)
-    #     return self.eval_metric(y,y_pred)
 

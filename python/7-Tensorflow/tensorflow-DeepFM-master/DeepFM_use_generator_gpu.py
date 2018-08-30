@@ -83,32 +83,26 @@ class DeepFM(BaseEstimator, TransformerMixin):
         dropout_keep_deep = self.dropout_deep
         field_size = self.field_size
         embedding_size = self.embedding_size
-        deep_layers = self.deep_layers
         deep_layers_activation = self.deep_layers_activation
-        _batch_norm = self.batch_norm
 
         embeddings = tf.nn.embedding_lookup(weights["feature_embeddings"], feat_index)
         feat_value = tf.reshape(feat_value, shape=[-1, field_size, 1])
         embeddings = tf.multiply(embeddings, feat_value)
+        # ------ FM component------
         # ---------- first order term ----------
         y_first_order = tf.nn.embedding_lookup(weights["feature_bias"], feat_index)  # None * F * 1
         y_first_order = tf.reduce_sum(tf.multiply(y_first_order, feat_value), 2)  # None * F
         y_first_order = tf.nn.dropout(y_first_order, dropout_keep_fm[0])  # None * F
-
         # ---------- second order term ---------------
         # sum_square part
         summed_features_emb = tf.reduce_sum(embeddings, 1)  # None * K
         summed_features_emb_square = tf.square(summed_features_emb)  # None * K
-
         # square_sum part
         squared_features_emb = tf.square(embeddings)
         squared_sum_features_emb = tf.reduce_sum(squared_features_emb, 1)  # None * K
-
         # second order
-        y_second_order = 0.5 * tf.subtract(summed_features_emb_square,
-                                                squared_sum_features_emb)  # None * K
+        y_second_order = 0.5 * tf.subtract(summed_features_emb_square,squared_sum_features_emb)  # None * K
         y_second_order = tf.nn.dropout(y_second_order, dropout_keep_fm[1])  # None * K
-
         # ---------- Deep component ----------
         # input
         y_deep_input = tf.reshape(embeddings, shape=[-1, field_size * embedding_size])  # None * (F*K)

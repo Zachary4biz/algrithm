@@ -18,7 +18,9 @@ import math
 import itertools
 from progressbar import ProgressBar
 from tensorflow.python.client import timeline
-from functools import wraps
+from functools import wraps,reduce
+import sys
+from tensorflow.python import debug as tf_debug
 
 ###########
 # scp到GPU服务器
@@ -71,9 +73,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.gpu_num = 1
         # 每个GPU分到的数据量
         self.payload_per_gpu = math.ceil(self.batch_size/self.gpu_num)
-        # timeline 工具的options和run_metadata
-        self.options = tf.RunOptions(trace_level = tf.RunOptions.FULL_TRACE)
-        self.run_metadata = tf.RunMetadata()
+
+
         self._init_graph()
 
     def _init_graph(self):
@@ -106,8 +107,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
                             pred = self.deep_fm_graph(weights=self.weights,
                                                       feat_multi_hot_idx_sp=feat_multi_hot_idx_sp,
                                                       feat_multi_hot_value_sp=feat_multi_hot_value_sp,
-                                                      feat_numeric=feat_numeric_sp,
-                                                      feat_category=feat_category_sp,
+                                                      feat_numeric_sp=feat_numeric_sp,
+                                                      feat_category_sp=feat_category_sp,
                                                       feat_total_idx_sp=feat_total_idx_sp,
                                                       feat_total_value_sp=feat_total_value_sp,
                                                       multi_hot_field_size=self.multi_hot_field_size)
@@ -127,7 +128,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
 
             _, _, _, _, _, _, _, tower_preds, tower_losses, tower_grads = zip(*self.models)
 
-            all_pred = tf.reshape(tf.concat(tower_preds, 0), [-1,1])
+            all_pred = tf.reshape(tf.concat(tower_preds, 0), [-1,1], name="all_pred_reshape_out")
             aver_loss_op = tf.reduce_mean(tower_losses)
             apply_gradient_op = _optimizer.apply_gradients(self.average_gradients(tower_grads))
 
@@ -140,15 +141,20 @@ class DeepFM(BaseEstimator, TransformerMixin):
             config.gpu_options.allow_growth = True
             self.sess = tf.Session(config=config)
 
-            # save model
-            self.saver = tf.train.Saver()
-            # save summary
+            # Timeline: 工具的options和run_metadata
+            self.options = tf.RunOptions(trace_level = tf.RunOptions.FULL_TRACE)
+            self.run_metadata = tf.RunMetadata()
+            # TensorBoard: save summary
             tf.summary.scalar('log_loss', self.loss)
             self.merge_summary = tf.summary.merge_all()#调用sess.run运行图，生成一步的训练过程数据, 是一个option
             self.writer = tf.summary.FileWriter("./graphs", self.sess.graph)
-
+            # Model: save model
+            self.saver = tf.train.Saver(max_to_keep=4)
             # init
-            self.sess.run(tf.global_variables_initializer())
+            init = tf.global_variables_initializer()
+            self.sess.run(init)
+
+            # self.sess = tf_debug.LocalCLIDebugWrapperSession(self.sess)
 
     def _initialize_weights(self):
         weights = dict()  # embeddings
@@ -187,9 +193,9 @@ class DeepFM(BaseEstimator, TransformerMixin):
 
     def deep_fm_graph(self,
                       weights,
-                      feat_total_idx_sp,feat_total_value_sp,
-                      feat_multi_hot_idx_sp,feat_multi_hot_value_sp,
-                      feat_numeric,feat_category,
+                      feat_total_idx_sp, feat_total_value_sp,
+                      feat_multi_hot_idx_sp, feat_multi_hot_value_sp,
+                      feat_numeric_sp, feat_category_sp,
                       multi_hot_field_size):
         dropout_keep_fm = self.dropout_fm
         dropout_keep_deep = self.dropout_deep
@@ -199,30 +205,39 @@ class DeepFM(BaseEstimator, TransformerMixin):
         train_phase = self.train_phase
 
         # ---------- FM component ---------
-        with tf.device("/cpu:0"),tf.name_scope("FM"):
+        with tf.name_scope("FM"):
             # ---------- first order term ----------
             with tf.name_scope("1st_order"):
-                y_first_order = tf.nn.embedding_lookup_sparse(weights["feature_bias"], sp_ids=feat_total_idx_sp,sp_weights=feat_total_value_sp, combiner="sum")
+                y_first_order = tf.nn.embedding_lookup_sparse(weights["feature_bias"], sp_ids=feat_total_idx_sp,
+                                                              sp_weights=feat_total_value_sp, combiner="sum")
                 y_first_order = tf.nn.dropout(y_first_order, dropout_keep_fm[0], name="y_first_order_dropout")  # None * F
             # ---------- second order term ---------------
             with tf.name_scope("2nd_order"):
                 # sum_square part
-                summed_features_emb_square = tf.square(tf.nn.embedding_lookup_sparse(weights["feature_embeddings"], sp_ids=feat_total_idx_sp,sp_weights=feat_total_value_sp, combiner="sum"))
+                summed_features_emb_square = tf.square(
+                    tf.nn.embedding_lookup_sparse(weights["feature_embeddings"], sp_ids=feat_total_idx_sp,
+                                                  sp_weights=feat_total_value_sp, combiner="sum"))
                 # square_sum part
-                squared_sum_features_emb = tf.nn.embedding_lookup_sparse(tf.square(weights["feature_embeddings"]), sp_ids=feat_total_idx_sp,sp_weights=tf.square(feat_total_value_sp), combiner="sum")
+                squared_sum_features_emb = tf.nn.embedding_lookup_sparse(tf.square(weights["feature_embeddings"]),
+                                                                         sp_ids=feat_total_idx_sp,
+                                                                         sp_weights=tf.square(feat_total_value_sp),
+                                                                         combiner="sum")
                 # second order
                 y_second_order = 0.5 * tf.subtract(summed_features_emb_square, squared_sum_features_emb)  # None * K
                 y_second_order = tf.nn.dropout(y_second_order, dropout_keep_fm[1])  # None * K
         # ---------- Deep component -------
         with tf.name_scope("Deep"):
-            with tf.device("/cpu:0"),tf.name_scope("total_emb"):
-                feat_one_hot = tf.sparse_add(feat_numeric,feat_category)
+            # total_embedding 均值
+            with tf.name_scope("total_emb"):
+                feat_one_hot = tf.sparse_add(feat_numeric_sp, feat_category_sp)
                 one_hot_embeddings = tf.nn.embedding_lookup(weights["feature_embeddings"], feat_one_hot.indices[:,1])
                 one_hot_embeddings = tf.reshape(one_hot_embeddings,shape=(-1,field_size,embedding_size))
                 multi_hot_embeddings = tf.nn.embedding_lookup_sparse(weights["feature_embeddings"],sp_ids=feat_multi_hot_idx_sp,sp_weights=feat_multi_hot_value_sp, combiner="mean")
-                total_one_hot_embeddings = tf.map_fn(lambda x: tf.pad(x,[[0,multi_hot_field_size],[0,0]]), one_hot_embeddings)
-                total_multi_hot_embeddings = tf.map_fn(lambda x: tf.pad(tf.reshape(x,shape=(1,-1)),[[field_size,0],[0,0]]), multi_hot_embeddings)
-                total_embeddings = tf.add(total_one_hot_embeddings,total_multi_hot_embeddings)
+                multi_hot_embeddings = tf.reshape(multi_hot_embeddings,shape=[-1,1,embedding_size])
+                total_embeddings = tf.concat([one_hot_embeddings,multi_hot_embeddings], axis=1)
+                # total_one_hot_embeddings = tf.map_fn(lambda x: tf.pad(x,[[0,multi_hot_field_size],[0,0]]), one_hot_embeddings)
+                # total_multi_hot_embeddings = tf.map_fn(lambda x: tf.pad(tf.reshape(x,shape=(1,-1)),[[field_size,0],[0,0]]), multi_hot_embeddings)
+                # total_embeddings = tf.add(total_one_hot_embeddings,total_multi_hot_embeddings)
             # input
             with tf.name_scope("input"):
                 y_deep_input = tf.reshape(total_embeddings, shape=[-1, self.field_size_total*embedding_size])  # None * (F*K)
@@ -274,26 +289,85 @@ class DeepFM(BaseEstimator, TransformerMixin):
         return average_grads
 
     def gen_feed_dict(self, y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot, tensor_dense_shape, train_phase):
+        # @timer
+        def get_sparse_idx(input_df):
+            result = []
+            for i in range(len(input_df)):
+                for j in input_df[i]:
+                    result.append([i, j])
+            return np.array(result)
+        # @timer
+        # def get_sparse_tensor_from(input_df, inp_tensor_shape):
+        #     tensor_values = []
+        #     tensor_indices = []
+        #     for i in range(len(input_df)):
+        #         for j in range(len(input_df[i])):
+        #             tensor_values.append(input_df[i][j])
+        #             tensor_indices.append([i, j])
+        #     sp_tensor = tf.SparseTensorValue(indices=tensor_indices, values=tensor_values, dense_shape=inp_tensor_shape)
+        #     return sp_tensor
+        # @timer
+        def get_sparse_tensor_from(input_df, inp_tensor_shape):
+            tensor_values_ = []
+            tensor_indices_ = []
+            for i in range(len(input_df)):
+                inp = input_df[i]
+                tensor_values_.extend(inp)
+                tensor_indices_.extend([[i,v] for v in range(len(inp))])
+            sp_tensor = tf.SparseTensorValue(indices=tensor_indices_, values=tensor_values_, dense_shape=inp_tensor_shape)
+            return sp_tensor
+        # @timer
+        # def get_sparse_tensor_from_quick(input_df, inp_tensor_shape):
+        #     tensor_values = [0] * sum(map(len,input_df))
+        #     tensor_indices = [[0,0]] * sum(map(len,input_df))
+        #     global_cnt = 0
+        #     for i in range(len(input_df)):
+        #         inp = input_df[i]
+        #         for j in range(len(inp)):
+        #             tensor_values[global_cnt] = inp[j]
+        #             tensor_indices[global_cnt] = [i,j]
+        #             global_cnt += 1
+        #     sp_tensor = tf.SparseTensorValue(indices=tensor_indices, values=tensor_values, dense_shape=inp_tensor_shape)
+        #     return sp_tensor
+        # @timer
+        # def get_sparse_tensor_from_v3(input_df, inp_tensor_shape):
+        #     tv = np.array([])
+        #     ti = np.array([[0, 0]])
+        #     for i in range(len(input_df)):
+        #         inp = input_df[i]
+        #         tv = np.append(tv,inp,axis=0)
+        #         ti = np.append(ti,[[i,v] for v in range(len(inp))],axis=0)
+        #     ti = np.delete(ti,0,0)
+        #     sp_tensor = tf.SparseTensorValue(indices=ti, values=tv, dense_shape=inp_tensor_shape)
+        #     return sp_tensor
+
         # ----- numeric category multi-hot 特征汇总 -----
         Xi_total = []
-        Xi_one_hot = np.concatenate((Xi_numeric,Xi_category), axis=1)
-        for col_id in range(len(Xi_one_hot)): Xi_total.append(list(Xi_one_hot[col_id])+Xi_multi_hot[col_id])
         Xv_total = []
-        Xv_one_hot = np.concatenate((Xv_numeric,Xv_category), axis=1)
-        for col_id in range(len(Xv_one_hot)): Xv_total.append(list(Xv_one_hot[col_id])+Xv_multi_hot[col_id])
+        for col_id in range(len(Xi_numeric)):
+            Xi_total.append(list(Xi_numeric[col_id])+list(Xi_category[col_id])+Xi_multi_hot[col_id])
+            Xv_total.append(list(Xv_numeric[col_id])+list(Xv_category[col_id])+Xv_multi_hot[col_id])
+        # print("construct xi_total xv_total , elapsed-time: %s" % (t1-t0))
         # ----- 构造place_holder的输入 -----
-        multi_hot_idx_spv = self.get_sparse_tensor_from(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
-        multi_hot_value_spv = self.get_sparse_tensor_from(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
         v_numeric_sparse = np.reshape(Xv_numeric,-1)
         v_category_sparse = np.reshape(Xv_category,-1)
-        idx_numeric_sparse = self.get_sparse_idx(Xi_numeric)
-        idx_category_sparse = self.get_sparse_idx(Xi_category)
-        total_idx_spv = self.get_sparse_tensor_from(Xi_total, inp_tensor_shape=tensor_dense_shape)
-        total_value_spv = self.get_sparse_tensor_from(Xv_total, inp_tensor_shape=tensor_dense_shape)
+        idx_numeric_sparse = get_sparse_idx(Xi_numeric)
+        idx_category_sparse = get_sparse_idx(Xi_category)
+        multi_hot_idx_spv = get_sparse_tensor_from(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
+        multi_hot_value_spv = get_sparse_tensor_from(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
+        total_idx_spv = get_sparse_tensor_from(Xi_total, inp_tensor_shape=tensor_dense_shape)
+        total_value_spv = get_sparse_tensor_from(Xv_total, inp_tensor_shape=tensor_dense_shape)
+
+        # multi_hot_idx_spv = get_sparse_tensor_from_v3(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
+        # multi_hot_value_spv = get_sparse_tensor_from_v3(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
+        # total_idx_spv = get_sparse_tensor_from_v3(Xi_total, inp_tensor_shape=tensor_dense_shape)
+        # total_value_spv = get_sparse_tensor_from_v3(Xv_total, inp_tensor_shape=tensor_dense_shape)
+
+
         # ----- 构造 feed_dict -----
         feed_dict = {self.dropout_keep_fm: self.dropout_fm,
-                    self.dropout_keep_deep: self.dropout_deep,
-                    self.train_phase: train_phase}
+                     self.dropout_keep_deep: self.dropout_deep,
+                     self.train_phase: train_phase}
         for i in range(len(self.models)):
             (f_numeric_sp, f_category_sp, multi_hot_idx_sp,
              multi_hot_value_sp, total_idx_sp, total_value_sp,
@@ -321,7 +395,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             fetched_timeline = timeline.Timeline(self.run_metadata.step_stats)
             chrome_trace = fetched_timeline.generate_chrome_trace_format()
             print("writting timeline for batch_cnt:%d" % batch_cnt)
-            with open('timeline_for_first_%s_batch.json' % t, 'w') as f: f.write(chrome_trace)
+            with open('./timeline_for_first_%s_batch.json' % t, 'w') as f:  f.write(chrome_trace)
         else:
             loss, opt, train_summary = self.sess.run((self.loss, self.optimizer, self.merge_summary), feed_dict=feed_dict)
             # print("取消summary观察速度是否变化") 无明显提升
@@ -331,111 +405,80 @@ class DeepFM(BaseEstimator, TransformerMixin):
         return loss
 
     def fit(self, data_generator):
-        valid_info = data_generator.get_apus_ad_valid()
+        max_auc = 0
+        global_batch_cnt = 0
         for epoch in range(self.epoch):
             train_generator = data_generator.get_apus_ad_train_generator()
             t1 = time()
-            # self.shuffle_in_unison_scary(Xi_train, Xv_train, y_train)
             batch_cnt = 0
             while True:
                 batch_info = list(itertools.islice(train_generator,0,self.batch_size))
                 if len(batch_info)>0:
                     loss = self.fit_on_batch(batch_info=batch_info, batch_cnt=batch_cnt)
-                    if (batch_cnt<=10 and batch_cnt % 2 == 0) or batch_cnt % 100 == 0:
-                        train_result = self.evaluate(batch_info)
+                    if batch_cnt % 100 == 0:
+                        train_mertic = self.evaluate_with_iter(iter(batch_info))
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-                        print(now+": "+"[epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_result, time() - t1))
+                        print(now+": "+"[epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_mertic, time() - t1))
                         t1 = time()
-                    if batch_cnt != 0 and ((batch_cnt<1000 and batch_cnt % 400 ==0) or batch_cnt % 1000) == 0:
+                    if batch_cnt != 0 and batch_cnt % 1000 == 0:
                         t2 = time()
-                        # y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot
-                        train_result = self.evaluate(valid_info, is_validation=True)
+                        valid_info = data_generator.get_apus_ad_valid()
+                        valid_mertic = self.evaluate_with_iter(valid_info)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-                        print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, train_result, time() - t2))
+                        print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, time() - t2))
+                        if valid_mertic>max_auc:
+                            max_auc = valid_mertic
+                            print("save model ...")
+                            self.saver.save(self.sess, "./apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
+                        t1 = time()
                 else:
                     break
                 batch_cnt += 1
+                global_batch_cnt += 1
 
-    def predict(self, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot, is_validation=False):
-        def get_batch(inp_Xi_numeric, inp_Xv_numeric, inp_Xi_category, inp_Xv_category, inp_Xi_multi_hot, inp_Xv_multi_hot, batch_size, index):
-            start = index * batch_size
-            end = (index+1) * batch_size
-            out_Xi_numeric_batch=inp_Xi_numeric[start:end]
-            out_Xv_numeric_batch=inp_Xv_numeric[start:end]
-            out_Xi_category_batch = inp_Xi_category[start:end]
-            out_Xv_category_batch = inp_Xv_category[start:end]
-            out_Xi_multi_hot_batch = inp_Xi_multi_hot[start:end]
-            out_Xv_multi_hot_batch = inp_Xv_multi_hot[start:end]
-            out_size_of_each_batch = len(out_Xi_multi_hot_batch)
-            return out_size_of_each_batch,out_Xi_numeric_batch,out_Xv_numeric_batch,out_Xi_category_batch,out_Xv_category_batch,out_Xi_multi_hot_batch,out_Xv_multi_hot_batch
-
-        batch_index = 0
-        y_pred = None
-        loop_hold = math.ceil(len(Xi_numeric) / self.batch_size)
-        if is_validation: progress = ProgressBar(max_value=math.ceil(len(Xi_numeric) / self.batch_size)).start()
-        # 不用 "<=loop_hold" 因为最后一组样本可能不足一个batch,如果该次使用的样本太少可能导致模型参数变差
-        while batch_index < loop_hold:
-            if is_validation: progress.update(batch_index)
-            (size_of_each_batch, Xi_numeric_batch, Xv_numeric_batch, Xi_category_batch, Xv_category_batch,
-             Xi_multi_hot_batch, Xv_multi_hot_batch) = get_batch(Xi_numeric, Xv_numeric,
-                                                                 Xi_category,
-                                                                 Xv_category,
-                                                                 Xi_multi_hot,
-                                                                 Xv_multi_hot,
-                                                                 self.batch_size,
-                                                                 batch_index)
-            num_batch = size_of_each_batch  # 最后一轮的时候,len(y_batch)小于等于self.batch_size
-            tensor_shape = [num_batch, self.feature_size]
-            # 注意这里predict不用传y,但是为了函数的统一性,构造一个默认的y传进去
-            dummy_y = [[0]]*size_of_each_batch
-            feed_dict = self.gen_feed_dict(y=dummy_y, Xi_numeric=Xi_numeric_batch, Xv_numeric=Xv_numeric_batch,
+    def predict_with_iterator(self, iterator):
+        y_pred = []
+        y = []
+        sample_cnt = 0
+        while True:
+            batch_info = list(itertools.islice(iterator, 0, self.batch_size))
+            num_batch = len(batch_info)
+            if num_batch>0:
+                dummy_y = [[0]]*num_batch
+                y_batch, Xi_numeric_batch, Xv_numeric_batch, Xi_category_batch, Xv_category_batch, Xi_multi_hot_batch, Xv_multi_hot_batch = zip(*batch_info)
+                feed_dict = self.gen_feed_dict(y=dummy_y, Xi_numeric=Xi_numeric_batch, Xv_numeric=Xv_numeric_batch,
                                Xi_category=Xi_category_batch, Xv_category=Xv_category_batch,
                                Xi_multi_hot=Xi_multi_hot_batch, Xv_multi_hot=Xv_multi_hot_batch,
-                               tensor_dense_shape=tensor_shape, train_phase=False)
-            batch_out = self.sess.run(self.out, feed_dict=feed_dict)
-            if batch_index == 0:
-                y_pred = np.reshape(batch_out, (num_batch,))
+                               tensor_dense_shape=[num_batch, self.feature_size], train_phase=False)
+                batch_out = self.sess.run(self.out, feed_dict=feed_dict).tolist()
+                y_pred.extend(batch_out)
+                y.extend(y_batch)
             else:
-                y_pred = np.concatenate((y_pred, np.reshape(batch_out, (num_batch,))))
-            batch_index += 1
-        if is_validation: progress.finish()
-        return y_pred
+                print("\n")
+                break
+            sample_cnt += num_batch
+            sys.stdout.write(' '*20 + '\r')
+            sys.stdout.flush()
+            sys.stdout.write("已完成样本数: %s" % sample_cnt)
+            sys.stdout.flush()
+        return y_pred,y
 
-    def evaluate(self, to_evaluate_info, is_validation=False):
-        y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = (np.array(x) for x in zip(*to_evaluate_info))
-        y_pred = self.predict(Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot, is_validation=is_validation)
+    def evaluate_with_iter(self, inp_iterator):
+        y_pred,y = self.predict_with_iterator(inp_iterator)
+        assert len(y) == len(y_pred), "y和y_pred长度不一样"
         return self.eval_metric(y, y_pred)
 
-    @staticmethod
-    def get_sparse_idx(input_df):
-        result = []
-        for i in range(len(input_df)):
-            for j in input_df[i]:
-                result.append([i, j])
-        return np.array(result)
 
-    @staticmethod
-    def get_sparse_tensor_from(input_df, inp_tensor_shape):
-        tensor_values = []
-        tensor_indices = []
-        for i in range(len(input_df)):
-            for j in range(len(input_df[i])):
-                tensor_values.append(input_df[i][j])
-                tensor_indices.append([i, j])
-        sp_tensor = tf.SparseTensorValue(indices=tensor_indices, values=tensor_values, dense_shape=inp_tensor_shape)
-        return sp_tensor
 
-def timer(text=""):
-    def decorator_func(inp_func):
-        @wraps(inp_func)
-        def warpper(*args,**kwargs):
-            start = time()
-            result = inp_func(*args, **kwargs)
-            end = time()
-            print("Function: {inp_fun_name}, Elapsed Time: {time}, other_log: {text}".format(inp_fun_name= inp_func.__name__, time=end-start, text=text))
-            return result
-        return warpper
-    return decorator_func
+def timer(inp_func):
+    @wraps(inp_func)
+    def warpper(*args, **kw):
+        start = time()
+        result = inp_func(*args, **kw)
+        end = time()
+        print("Function: {inp_fun_name}, Elapsed Time: {time}".format(inp_fun_name=inp_func.__name__, time=end - start))
+        return result
+    return warpper
 
 def debug_hook(ori_func, new_func):
     @wraps(ori_func)
@@ -456,9 +499,11 @@ def replaced_gen_feed_dict(ori_function, self, y, Xi_numeric, Xv_numeric, Xi_cat
     end = time()
     print("gen_feed_dict, Elapsed Time: {time}, ".format(time=end-start))
     return result
-DeepFM.fit_on_batch = debug_hook(DeepFM.fit_on_batch, replaced_fit_one_batch)
-DeepFM.gen_feed_dict = debug_hook(DeepFM.gen_feed_dict, replaced_gen_feed_dict)
 
+
+# DeepFM.fit_on_batch = debug_hook(DeepFM.fit_on_batch, replaced_fit_one_batch)  函数可以直接hook
+# DeepFM.gen_feed_dict = debug_hook(DeepFM.gen_feed_dict, replaced_gen_feed_dict)
+# DeepFM.saver.save = debug_hook(DeepFM.saver.save, replaced_saver_save)  变量要初始化后才行,不然报警
 
 
 

@@ -30,11 +30,11 @@ class DataGenerator(object):
     def get_valid(self):
         return self._get_valid(self.valid_path)
     def get_apus_ad_train_generator(self):
-        return self._get_apus_ad_generator(self.train_path)
+        return self._yield_apus_ad_generator(self.train_path)
     def get_apus_ad_valid(self):
-        return self._get_apus_ad_valid(self.valid_path)
+        return self._yield_apus_ad_generator(self.valid_path)
     @staticmethod
-    def _get_apus_ad_generator(reader_path):
+    def _yield_apus_ad_generator(reader_path):
         with open(reader_path, "r") as f:
             for line in f:
                 info = line.strip("[]\n").split("\t")
@@ -57,7 +57,8 @@ class DataGenerator(object):
                 idx = [int(x.split(":")[0]) for x in feature_info]
                 value = [float(x.split(":")[1]) for x in feature_info]
                 return idx,value
-        out_y_valid_, out_Xi_numeric_valid, out_Xv_numeric_valid, out_Xi_category_valid, out_Xv_category_valid, out_Xi_multi_hot_valid, out_Xv_multi_hot_valid= ([] for _ in range(7))
+        # out_y_valid_, out_Xi_numeric_valid, out_Xv_numeric_valid, out_Xi_category_valid, out_Xv_category_valid, out_Xi_multi_hot_valid, out_Xv_multi_hot_valid= ([] for _ in range(7))
+        valid_info = []
         with open(reader_path, "r", encoding="utf-8") as f:
             data = f.readlines()[:1024*100]
         DataGenerator.print_t("   _get_apus_ad_valid looping..")
@@ -74,16 +75,17 @@ class DataGenerator(object):
                 Xi_numeric, Xv_numeric = get_idx_and_value(numeric_f)
                 Xi_category, Xv_category = get_idx_and_value(category_f)
                 Xi_multi_hot, Xv_multi_hot = get_idx_and_value(multi_hot_f)
-                out_y_valid_.append(y)
-                out_Xi_numeric_valid.append(Xi_numeric)
-                out_Xv_numeric_valid.append(Xv_numeric)
-                out_Xi_category_valid.append(Xi_category)
-                out_Xv_category_valid.append(Xv_category)
-                out_Xi_multi_hot_valid.append(Xi_multi_hot)
-                out_Xv_multi_hot_valid.append(Xv_multi_hot)
+                valid_info.append([y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot])
+                # out_y_valid_.append(y)
+                # out_Xi_numeric_valid.append(Xi_numeric)
+                # out_Xv_numeric_valid.append(Xv_numeric)
+                # out_Xi_category_valid.append(Xi_category)
+                # out_Xv_category_valid.append(Xv_category)
+                # out_Xi_multi_hot_valid.append(Xi_multi_hot)
+                # out_Xv_multi_hot_valid.append(Xv_multi_hot)
                 i+=1
                 progress.update(i)
-        return out_y_valid_, out_Xi_numeric_valid, out_Xv_numeric_valid, out_Xi_category_valid, out_Xv_category_valid, out_Xi_multi_hot_valid, out_Xv_multi_hot_valid
+        return valid_info
     @staticmethod
     def _get_generator(reader_path):
         with open(reader_path, "r", encoding="utf-8") as f:
@@ -128,11 +130,11 @@ def apus_ad_multi_hot():
         "use_deep": True,
         "embedding_size": 10,
         "dropout_fm": [1.0, 1.0],
-        "deep_layers": [400, 400, 400],
-        "dropout_deep": [1.0, 1.0, 1.0, 1.0],
+        "deep_layers": [128, 32, 32],
+        "dropout_deep": [0.8, 0.8, 0.8, 0.8],
         "deep_layers_activation": tf.nn.relu,
         "epoch": 30,
-        "batch_size": 1024,
+        "batch_size": 1024*10,
         "learning_rate": 0.001,
         "optimizer_type": "adam",
         "batch_norm": 1,
@@ -158,7 +160,6 @@ def apus_ad_multi_hot():
     print_t("loading data-generator")
     data_generator = DataGenerator(train_path=path_train, valid_path=path_valid)
     print_t("loading valid")
-    y_valid_, Xi_numeric_valid, Xv_numeric_valid, Xi_category_valid, Xv_category_valid, Xi_multi_hot_valid, Xv_multi_hot_valid = data_generator.get_apus_ad_valid()
 
     # init a DeepFM model
     dfm_params_local["feature_size"] = 101199+1
@@ -169,10 +170,7 @@ def apus_ad_multi_hot():
     # fit a DeepFM model
     print_t("fitting ...")
     time_b = time.time()
-    dfm_local.fit(data_generator=data_generator, y_valid=y_valid_,
-                  Xi_numeric_valid=Xi_numeric_valid, Xv_numeric_valid=Xv_numeric_valid,
-                  Xi_category_valid=Xi_category_valid, Xv_category_valid=Xv_category_valid,
-                  Xi_multi_hot_valid=Xi_multi_hot_valid, Xv_multi_hot_valid=Xv_multi_hot_valid)
+    dfm_local.fit(data_generator=data_generator)
     time_e = time.time()
     print_t("time elapse : %s s" % (time_e - time_b))
 
@@ -229,8 +227,8 @@ def criteo_ad_no_multi_hot():
     result = dfm_local.evaluate(Xi_valid, Xv_valid, y_valid)
     print_t("   " + str(result))
 
-criteo_ad_no_multi_hot()
-# apus_ad_multi_hot()
+# criteo_ad_no_multi_hot()
+apus_ad_multi_hot()
 
 
 

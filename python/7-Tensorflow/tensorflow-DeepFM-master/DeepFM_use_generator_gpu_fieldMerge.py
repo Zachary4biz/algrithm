@@ -70,7 +70,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.greater_is_better = greater_is_better
         self.train_result, self.valid_result = [], []
         # gpu个数
-        self.gpu_num = 1
+        self.gpu_num = gpu_num
         # 每个GPU分到的数据量
         self.payload_per_gpu = math.ceil(self.batch_size/self.gpu_num)
 
@@ -288,7 +288,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             average_grads.append(grad_and_var)
         return average_grads
 
-    def gen_feed_dict(self, y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot, tensor_dense_shape, train_phase):
+    def gen_feed_dict(self, y_inp, Xi_numeric_inp, Xv_numeric_inp, Xi_category_inp, Xv_category_inp, Xi_multi_hot_inp, Xv_multi_hot_inp, train_phase):
         # @timer
         def get_sparse_idx(input_df):
             result = []
@@ -296,74 +296,23 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 for j in input_df[i]:
                     result.append([i, j])
             return np.array(result)
-        # @timer
-        # def get_sparse_tensor_from(input_df, inp_tensor_shape):
-        #     tensor_values = []
-        #     tensor_indices = []
-        #     for i in range(len(input_df)):
-        #         for j in range(len(input_df[i])):
-        #             tensor_values.append(input_df[i][j])
-        #             tensor_indices.append([i, j])
-        #     sp_tensor = tf.SparseTensorValue(indices=tensor_indices, values=tensor_values, dense_shape=inp_tensor_shape)
-        #     return sp_tensor
-        # @timer
         def get_sparse_tensor_from(input_df, inp_tensor_shape):
             tensor_values_ = []
             tensor_indices_ = []
-            for i in range(len(input_df)):
-                inp = input_df[i]
-                tensor_values_.extend(inp)
-                tensor_indices_.extend([[i,v] for v in range(len(inp))])
+            for idx in range(len(input_df)):
+                tensor_values_.extend(input_df[idx])
+                tensor_indices_.extend([[idx,v] for v in range(len(input_df[idx]))])
             sp_tensor = tf.SparseTensorValue(indices=tensor_indices_, values=tensor_values_, dense_shape=inp_tensor_shape)
             return sp_tensor
-        # @timer
-        # def get_sparse_tensor_from_quick(input_df, inp_tensor_shape):
-        #     tensor_values = [0] * sum(map(len,input_df))
-        #     tensor_indices = [[0,0]] * sum(map(len,input_df))
-        #     global_cnt = 0
-        #     for i in range(len(input_df)):
-        #         inp = input_df[i]
-        #         for j in range(len(inp)):
-        #             tensor_values[global_cnt] = inp[j]
-        #             tensor_indices[global_cnt] = [i,j]
-        #             global_cnt += 1
-        #     sp_tensor = tf.SparseTensorValue(indices=tensor_indices, values=tensor_values, dense_shape=inp_tensor_shape)
-        #     return sp_tensor
-        # @timer
-        # def get_sparse_tensor_from_v3(input_df, inp_tensor_shape):
-        #     tv = np.array([])
-        #     ti = np.array([[0, 0]])
-        #     for i in range(len(input_df)):
-        #         inp = input_df[i]
-        #         tv = np.append(tv,inp,axis=0)
-        #         ti = np.append(ti,[[i,v] for v in range(len(inp))],axis=0)
-        #     ti = np.delete(ti,0,0)
-        #     sp_tensor = tf.SparseTensorValue(indices=ti, values=tv, dense_shape=inp_tensor_shape)
-        #     return sp_tensor
-
-        # ----- numeric category multi-hot 特征汇总 -----
-        Xi_total = []
-        Xv_total = []
-        for col_id in range(len(Xi_numeric)):
-            Xi_total.append(list(Xi_numeric[col_id])+list(Xi_category[col_id])+Xi_multi_hot[col_id])
-            Xv_total.append(list(Xv_numeric[col_id])+list(Xv_category[col_id])+Xv_multi_hot[col_id])
-        # print("construct xi_total xv_total , elapsed-time: %s" % (t1-t0))
-        # ----- 构造place_holder的输入 -----
-        v_numeric_sparse = np.reshape(Xv_numeric,-1)
-        v_category_sparse = np.reshape(Xv_category,-1)
-        idx_numeric_sparse = get_sparse_idx(Xi_numeric)
-        idx_category_sparse = get_sparse_idx(Xi_category)
-        multi_hot_idx_spv = get_sparse_tensor_from(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
-        multi_hot_value_spv = get_sparse_tensor_from(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
-        total_idx_spv = get_sparse_tensor_from(Xi_total, inp_tensor_shape=tensor_dense_shape)
-        total_value_spv = get_sparse_tensor_from(Xv_total, inp_tensor_shape=tensor_dense_shape)
-
-        # multi_hot_idx_spv = get_sparse_tensor_from_v3(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
-        # multi_hot_value_spv = get_sparse_tensor_from_v3(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
-        # total_idx_spv = get_sparse_tensor_from_v3(Xi_total, inp_tensor_shape=tensor_dense_shape)
-        # total_value_spv = get_sparse_tensor_from_v3(Xv_total, inp_tensor_shape=tensor_dense_shape)
-
-
+        def get_payload_gpu(gpu_cnt, payload,*allData_inp):
+            result = []
+            start = gpu_cnt*payload
+            end = (gpu_cnt+1)*payload
+            for data in allData_inp:
+                result.append(data[start:end])
+            return result
+        allData = [y_inp, Xi_numeric_inp, Xv_numeric_inp, Xi_category_inp, Xv_category_inp, Xi_multi_hot_inp, Xv_multi_hot_inp]
+        payload_per_gpu = math.ceil(len(y_inp)/self.gpu_num)
         # ----- 构造 feed_dict -----
         feed_dict = {self.dropout_keep_fm: self.dropout_fm,
                      self.dropout_keep_deep: self.dropout_deep,
@@ -372,6 +321,26 @@ class DeepFM(BaseEstimator, TransformerMixin):
             (f_numeric_sp, f_category_sp, multi_hot_idx_sp,
              multi_hot_value_sp, total_idx_sp, total_value_sp,
              labels, _, _, _) = self.models[i]
+            # 把每个batch拆解成 n个gpu的输入数据
+            y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = get_payload_gpu(i, payload_per_gpu, *allData)
+            # ----- numeric category multi-hot 特征汇总 -----
+            Xi_total = []
+            Xv_total = []
+            for col_id in range(len(Xi_numeric)):
+                Xi_total.append(list(Xi_numeric[col_id])+list(Xi_category[col_id])+Xi_multi_hot[col_id])
+                Xv_total.append(list(Xv_numeric[col_id])+list(Xv_category[col_id])+Xv_multi_hot[col_id])
+            # print("construct xi_total xv_total , elapsed-time: %s" % (t1-t0))
+            # ----- 构造place_holder的输入 -----
+            tensor_dense_shape = [len(y), self.feature_size]
+            v_numeric_sparse = np.reshape(Xv_numeric,-1)
+            v_category_sparse = np.reshape(Xv_category,-1)
+            idx_numeric_sparse = get_sparse_idx(Xi_numeric)
+            idx_category_sparse = get_sparse_idx(Xi_category)
+            multi_hot_idx_spv = get_sparse_tensor_from(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
+            multi_hot_value_spv = get_sparse_tensor_from(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
+            total_idx_spv = get_sparse_tensor_from(Xi_total, inp_tensor_shape=tensor_dense_shape)
+            total_value_spv = get_sparse_tensor_from(Xv_total, inp_tensor_shape=tensor_dense_shape)
+            # ----- 构造字典 -----
             feed_dict[f_numeric_sp] = tf.SparseTensorValue(indices=idx_numeric_sparse,values=v_numeric_sparse,dense_shape=tensor_dense_shape)
             feed_dict[f_category_sp] = tf.SparseTensorValue(indices=idx_category_sparse,values=v_category_sparse,dense_shape=tensor_dense_shape)
             feed_dict[multi_hot_idx_sp] =  multi_hot_idx_spv
@@ -385,8 +354,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         # ----- batch 数据拆分 -----
         y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = (np.array(x) for x in zip(*batch_info))
         # ----- 构造feed_dict -----
-        feed_dict = self.gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot,
-                                       tensor_dense_shape=[len(batch_info), self.feature_size], train_phase=True)
+        feed_dict = self.gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot, train_phase=True)
         t = 4
         if batch_cnt <= t:
             # sess.run and record timeline
@@ -398,7 +366,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             with open('./timeline_for_first_%s_batch.json' % t, 'w') as f:  f.write(chrome_trace)
         else:
             loss, opt, train_summary = self.sess.run((self.loss, self.optimizer, self.merge_summary), feed_dict=feed_dict)
-            # print("取消summary观察速度是否变化") 无明显提升
+            # print("取消summary观察速度是否变化") 无明显提升 22.1 22.2 到 21.4 21.6
             # loss, opt = self.sess.run((self.loss, self.optimizer), feed_dict=feed_dict)
         # save summary
         self.writer.add_summary(train_summary,batch_cnt)
@@ -435,6 +403,17 @@ class DeepFM(BaseEstimator, TransformerMixin):
                     break
                 batch_cnt += 1
                 global_batch_cnt += 1
+            t2 = time()
+            valid_info = data_generator.get_apus_ad_valid()
+            valid_mertic = self.evaluate_with_iter(valid_info)
+            now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
+            print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, time() - t2))
+            if valid_mertic>max_auc:
+                max_auc = valid_mertic
+                print("save model ...")
+                self.saver.save(self.sess, "./apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
+
+
 
     def predict_with_iterator(self, iterator):
         y_pred = []
@@ -446,10 +425,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
             if num_batch>0:
                 dummy_y = [[0]]*num_batch
                 y_batch, Xi_numeric_batch, Xv_numeric_batch, Xi_category_batch, Xv_category_batch, Xi_multi_hot_batch, Xv_multi_hot_batch = zip(*batch_info)
-                feed_dict = self.gen_feed_dict(y=dummy_y, Xi_numeric=Xi_numeric_batch, Xv_numeric=Xv_numeric_batch,
-                               Xi_category=Xi_category_batch, Xv_category=Xv_category_batch,
-                               Xi_multi_hot=Xi_multi_hot_batch, Xv_multi_hot=Xv_multi_hot_batch,
-                               tensor_dense_shape=[num_batch, self.feature_size], train_phase=False)
+                feed_dict = self.gen_feed_dict(y_inp=dummy_y, Xi_numeric_inp=Xi_numeric_batch, Xv_numeric_inp=Xv_numeric_batch,
+                               Xi_category_inp=Xi_category_batch, Xv_category_inp=Xv_category_batch,
+                               Xi_multi_hot_inp=Xi_multi_hot_batch, Xv_multi_hot_inp=Xv_multi_hot_batch,
+                               train_phase=False)
                 batch_out = self.sess.run(self.out, feed_dict=feed_dict).tolist()
                 y_pred.extend(batch_out)
                 y.extend(y_batch)

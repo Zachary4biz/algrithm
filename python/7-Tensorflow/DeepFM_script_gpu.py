@@ -134,7 +134,7 @@ def apus_ad_multi_hot():
         "dropout_deep": [0.8, 0.8, 0.8, 0.8],
         "deep_layers_activation": tf.nn.relu,
         "epoch": 30,
-        "batch_size": 1024*10,
+        "batch_size": 1024*12,
         "learning_rate": 0.001,
         "optimizer_type": "adam",
         "batch_norm": 1,

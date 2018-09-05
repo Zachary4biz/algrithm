@@ -38,7 +38,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
                  verbose=False, random_seed=2016,
                  use_fm=True, use_deep=True,
                  loss_type="logloss", eval_metric=roc_auc_score,
-                 l2_reg=0.0, greater_is_better=True,gpu_num=1):
+                 l2_reg=0.0, greater_is_better=True,gpu_num=1,is_debug=False):
         assert (use_fm or use_deep)
         assert loss_type in ["logloss", "mse"],"loss_type can be either 'logloss' for classification task or 'mse' for regression task"
 
@@ -73,6 +73,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.gpu_num = gpu_num
         # 每个GPU分到的数据量
         self.payload_per_gpu = math.ceil(self.batch_size/self.gpu_num)
+        # 是否使用tfdbg
+        self.debug = is_debug
 
 
         self._init_graph()
@@ -137,10 +139,11 @@ class DeepFM(BaseEstimator, TransformerMixin):
             self.loss = aver_loss_op
 
             # sess
-            config=tf.ConfigProto(allow_soft_placement=True,log_device_placement=True)
+            config=tf.ConfigProto(allow_soft_placement=True,log_device_placement=False)
             config.gpu_options.allow_growth = True
-            self.sess = tf.Session(config=config)
-
+            self.sess = tf.Session(config=config, graph=self.graph)
+            if self.debug:
+                self.sess = tf_debug.LocalCLIDebugWrapperSession(self.sess)
             # Timeline: 工具的options和run_metadata
             self.options = tf.RunOptions(trace_level = tf.RunOptions.FULL_TRACE)
             self.run_metadata = tf.RunMetadata()
@@ -242,27 +245,33 @@ class DeepFM(BaseEstimator, TransformerMixin):
             with tf.name_scope("input"):
                 y_deep_input = tf.reshape(total_embeddings, shape=[-1, self.field_size_total*embedding_size])  # None * (F*K)
                 y_deep_input = tf.nn.dropout(y_deep_input, dropout_keep_deep[0])
-            # layer1
-            with tf.name_scope("layer1"):
+            # layer0
+            with tf.name_scope("layer0"):
                 y_deep_layer_0 = tf.add(tf.matmul(y_deep_input, weights["layer_0"]),weights["bias_0"])
                 y_deep_layer_0 = self.batch_norm_layer(y_deep_layer_0, train_phase=train_phase, scope_bn="bn_0")
                 y_deep_layer_0 = deep_layers_activation(y_deep_layer_0)
                 y_deep_layer_0 = tf.nn.dropout(y_deep_layer_0, dropout_keep_deep[1])
-            # layer2
-            with tf.name_scope("layer2"):
+            # layer1
+            with tf.name_scope("layer1"):
                 y_deep_layer_1 = tf.add(tf.matmul(y_deep_layer_0, weights["layer_1"]),weights["bias_1"])
                 y_deep_layer_1 = self.batch_norm_layer(y_deep_layer_1, train_phase=train_phase, scope_bn="bn_1")
                 y_deep_layer_1 = deep_layers_activation(y_deep_layer_1)
                 y_deep_layer_1 = tf.nn.dropout(y_deep_layer_1, dropout_keep_deep[2])
-            # layer3
-            with tf.name_scope("layer3"):
+            # layer2
+            with tf.name_scope("layer2"):
                 y_deep_layer_2 = tf.add(tf.matmul(y_deep_layer_1, weights["layer_2"]),weights["bias_2"])
                 y_deep_layer_2 = self.batch_norm_layer(y_deep_layer_2, train_phase=train_phase, scope_bn="bn_2")
                 y_deep_layer_2 = deep_layers_activation(y_deep_layer_2)
-                y_deep_layer_2 = tf.nn.dropout(y_deep_layer_2, dropout_keep_deep[2])
+                y_deep_layer_2 = tf.nn.dropout(y_deep_layer_2, dropout_keep_deep[3])
+            # layer3
+            with tf.name_scope("layer3"):
+                y_deep_layer_3 = tf.add(tf.matmul(y_deep_layer_2, weights["layer_3"]),weights["bias_3"])
+                y_deep_layer_3 = self.batch_norm_layer(y_deep_layer_3, train_phase=train_phase, scope_bn="bn_3")
+                y_deep_layer_3 = deep_layers_activation(y_deep_layer_3)
+                y_deep_layer_3 = tf.nn.dropout(y_deep_layer_3, dropout_keep_deep[4])
         # ---------- DeepFM ---------------
         with tf.name_scope("DeepFM"):
-            concat_input = tf.concat([y_first_order, y_second_order, y_deep_layer_2], axis=1)
+            concat_input = tf.concat([y_first_order, y_second_order, y_deep_layer_3], axis=1)
             out = tf.add(tf.matmul(concat_input, weights["concat_projection"]), weights["concat_bias"])
 
         return tf.nn.sigmoid(out)
@@ -314,8 +323,13 @@ class DeepFM(BaseEstimator, TransformerMixin):
         allData = [y_inp, Xi_numeric_inp, Xv_numeric_inp, Xi_category_inp, Xv_category_inp, Xi_multi_hot_inp, Xv_multi_hot_inp]
         payload_per_gpu = math.ceil(len(y_inp)/self.gpu_num)
         # ----- 构造 feed_dict -----
-        feed_dict = {self.dropout_keep_fm: self.dropout_fm,
-                     self.dropout_keep_deep: self.dropout_deep,
+        dropout_deep = self.dropout_deep
+        dropout_fm = self.dropout_fm
+        if not train_phase:
+            dropout_deep = [1.0] * len(self.dropout_deep)
+            dropout_fm = [1.0] * len(self.dropout_fm)
+        feed_dict = {self.dropout_keep_fm: dropout_fm,
+                     self.dropout_keep_deep: dropout_deep,
                      self.train_phase: train_phase}
         for i in range(len(self.models)):
             (f_numeric_sp, f_category_sp, multi_hot_idx_sp,
@@ -388,7 +402,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
                         print(now+": "+"[epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_mertic, time() - t1))
                         t1 = time()
-                    if batch_cnt != 0 and batch_cnt % 1000 == 0:
+                    if batch_cnt != 0 and batch_cnt % 2500 == 0:
+                        # total is 51949610, batch_size = 9126, batch_cnt = 5637
                         t2 = time()
                         valid_info = data_generator.get_apus_ad_valid()
                         valid_mertic = self.evaluate_with_iter(valid_info)
@@ -413,8 +428,6 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 print("save model ...")
                 self.saver.save(self.sess, "./apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
 
-
-
     def predict_with_iterator(self, iterator):
         y_pred = []
         y = []
@@ -435,18 +448,23 @@ class DeepFM(BaseEstimator, TransformerMixin):
             else:
                 print("\n")
                 break
-            sample_cnt += num_batch
-            sys.stdout.write(' '*20 + '\r')
-            sys.stdout.flush()
-            sys.stdout.write("已完成样本数: %s" % sample_cnt)
-            sys.stdout.flush()
+            if sample_cnt % (100*10000) == 0:
+                sample_cnt += num_batch
+                sys.stdout.write(' '*20 + '\r')
+                sys.stdout.flush()
+                sys.stdout.write("已完成样本数: %s" % sample_cnt)
+                sys.stdout.flush()
         return y_pred,y
 
     def evaluate_with_iter(self, inp_iterator):
         y_pred,y = self.predict_with_iterator(inp_iterator)
         assert len(y) == len(y_pred), "y和y_pred长度不一样"
-        return self.eval_metric(y, y_pred)
-
+        result = -1
+        try:
+            result = self.eval_metric(y, y_pred)
+        except ValueError:
+            print("only one class present in y_true")
+        return result
 
 
 def timer(inp_func):

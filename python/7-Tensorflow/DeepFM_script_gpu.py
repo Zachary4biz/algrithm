@@ -6,7 +6,7 @@ from DeepFM_use_generator_gpu import DeepFM
 import time
 import sys
 from progressbar import ProgressBar
-
+import numpy as np
 ########
 # 单机试运行 GPU DeepFM模型: https://github.com/ChenglongChen/tensorflow-DeepFM
 # scp文件到 GPU 服务器
@@ -130,41 +130,49 @@ def apus_ad_multi_hot():
         "use_deep": True,
         "embedding_size": 10,
         "dropout_fm": [1.0, 1.0],
-        "deep_layers": [128, 32, 32],
-        "dropout_deep": [0.8, 0.8, 0.8, 0.8],
+        "deep_layers": [2048, 1024, 512, 256],
+        "dropout_deep": [1.0, 1.0, 1.0, 1.0, 1.0],
         "deep_layers_activation": tf.nn.relu,
         "epoch": 30,
-        "batch_size": 1024*12,
-        "learning_rate": 0.001,
+        "batch_size": 1024*9,
+        "learning_rate": 0.0001,
         "optimizer_type": "adam",
         "batch_norm": 1,
-        "batch_norm_decay": 0.995,
+        "batch_norm_decay": 0.999,
         "l2_reg": 0.001,
         # "l2_reg": 0.0,
         "verbose": True,
         "eval_metric": roc_auc_score,
         "random_seed": 2017,
-        "gpu_num":3,
-        "multi_hot_size": 1
+        "gpu_num":1,
+        'is_debug':False
     }
 
     print_t("params:")
     for k, v in dfm_params_local.items():
         print_t("   %s : %s" % (str(k), str(v)))
-    path_train = "/home/zhoutong/data/apus_ad/apus_ad_feature_train"
-    path_valid = "/home/zhoutong/data/apus_ad/apus_ad_feature_valid"
-    # path_train = "/home/zhoutong/data/apus_ad/tmp_apus_ad_feature_train"
-    # path_valid = "/home/zhoutong/data/apus_ad/tmp_apus_ad_feature_valid"
-    # path_train= "/data/houcunyue/zhoutong/data/apus_ad/ad_feature_libsvm/apus_ad_feature_train"
-    # path_valid= "/data/houcunyue/zhoutong/data/apus_ad/ad_feature_libsvm/apus_ad_feature_valid"
+
+
+    ###### 使用一天的数据
+    # path_train = "/home/zhoutong/data/apus_ad/apus_ad_feature_train"
+    # path_valid = "/home/zhoutong/data/apus_ad/apus_ad_feature_valid"
+    # dfm_params_local["feature_size"] = 101199+1
+    # dfm_params_local["field_size"] = 2+13
+    # dfm_params_local["multi_hot_size"] = 1
+    ###### 使用七天的数据
+    path_train = "/home/zhoutong/data/apus_ad/train_data_0717_0730_shuffled"
+    path_valid = "/home/zhoutong/data/apus_ad/valid_data_0801_0806_shuffled"
+    dfm_params_local["feature_size"] = 161720+1
+    dfm_params_local["field_size"] = 2+13
+    dfm_params_local["multi_hot_size"] = 1
+
     print_t("loading data-generator")
     data_generator = DataGenerator(train_path=path_train, valid_path=path_valid)
     print_t("loading valid")
 
     # init a DeepFM model
-    dfm_params_local["feature_size"] = 101199+1
-    dfm_params_local["field_size"] = 2+13
     print_t("constructing DeepFM...")
+    print_t("batch_size:%s, gpu_num:%s" % (dfm_params_local['batch_size'], dfm_params_local['gpu_num']))
     dfm_local = DeepFM_fieldMerge(**dfm_params_local)
 
     # fit a DeepFM model
@@ -231,6 +239,82 @@ def criteo_ad_no_multi_hot():
 apus_ad_multi_hot()
 
 
+def pre_data():
+    def _yield_apus_ad_generator(reader_path):
+        with open(reader_path, "r") as f:
+            for line in f:
+                yield line
+
+    def func(path, data_g):
+        f_train_pos = open(path + "_shuffled_pos", "w")
+        f_train_neg = open(path + "_shuffled_neg", "w")
+        cnt = 0
+        while True:
+            try:
+                sample = next(data_g)
+                if sample.strip("[]\n").split("\t")[0] == '0':
+                    f_train_neg.writelines(sample)
+                elif sample.strip("[]\n").split("\t")[0] == '1':
+                    f_train_pos.writelines(sample)
+                else:
+                    f_train_pos.close()
+                    f_train_neg.close()
+                    raise Exception("%s行有非01样本" % cnt)
+            except StopIteration:
+                break
+            cnt += 1
+
+        f_train_pos.close()
+        f_train_neg.close()
+
+    path_train = "/home/zhoutong/data/apus_ad/train_data_0717_0730"
+    train_generator = _yield_apus_ad_generator(reader_path=path_train)
+    path_valid = "/home/zhoutong/data/apus_ad/valid_data_0801_0806"
+    valid_info = _yield_apus_ad_generator(reader_path=path_valid)
+    t1=time.time()
+    func(path_train, train_generator)
+    t2=time.time()
+    func(path_valid, valid_info)
+    t3=time.time()
+    print(t2-t1, t3-t2)
+
+
+
+    def generate_shuffled(path, neg_ge, pos_ge,r_pos,r_neg):
+        """
+        正样本负样本的比例需要传入,两者加和为1,通常由于正样本比较珍贵,要减少对正样本的丢弃
+        所以传参的时候,正样本的比例可以入一位,比如正负样本占比为 0.3297 0.6703,可以将正样本比例定位0.33,负样本定位0.67
+        :param path:
+        :param neg_ge:
+        :param pos_ge:
+        :return:
+        """
+        import itertools
+        import random
+        import math
+        with open(path + "_shuffled", "w+") as f:
+            while True:
+                neg = list(itertools.islice(neg_ge, 0, math.ceil(1024 * r_neg)))
+                pos = list(itertools.islice(pos_ge, 0, math.ceil(1024 * r_pos)))
+                if len(pos) < int(1024 * r_pos):
+                    print("pos只剩 %s 个,不写入文件(neg此次有 %s 个)" % (len(pos), len(neg)))
+                elif len(neg) < int(1024*r_neg):
+                    print("neg只剩 %s 个,不写入文件(pos此次有 %s 个)" % (len(neg), len(pos)))
+                else:
+                    result = pos + neg
+                    random.shuffle(result)
+                    f.writelines(result)
+                if len(neg)==0 and len(pos)==0:
+                    print("pos neg 均为0,退出循环")
+                    break
+
+    valid_neg = _yield_apus_ad_generator(reader_path=path_valid+"_shuffled_neg") # 17275518 (0.6705
+    valid_pos = _yield_apus_ad_generator(reader_path=path_valid+"_shuffled_pos") # 8488319 (0.3294
+    generate_shuffled(path_valid, valid_neg, valid_pos,r_pos=0.33,r_neg=0.67)
+
+    train_neg = _yield_apus_ad_generator(reader_path=path_train+"_shuffled_neg") # 35280416 (0.6791
+    train_pos = _yield_apus_ad_generator(reader_path=path_train+"_shuffled_pos") # 16669194 (0.3208  总计(51949610)
+    generate_shuffled(path_train, train_neg, train_pos,r_pos=0.33,r_neg=0.67)
 
 
 

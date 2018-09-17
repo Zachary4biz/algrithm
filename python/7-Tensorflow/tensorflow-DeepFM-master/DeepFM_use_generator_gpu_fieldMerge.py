@@ -12,6 +12,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import roc_auc_score
 from time import time
 import time as ori_time
+from sklearn.metrics import log_loss
 from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 from yellowfin import YFOptimizer
 import math
@@ -47,6 +48,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.embedding_size = embedding_size    # denote as K, size of the feature embedding
         self.multi_hot_field_size = multi_hot_size
         self.field_size_total = field_size+multi_hot_size
+        self.numeric_feature_size = 2
 
         self.dropout_fm = dropout_fm
         self.deep_layers = deep_layers
@@ -77,6 +79,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.debug = is_debug
 
 
+
         self._init_graph()
 
     def _init_graph(self):
@@ -89,8 +92,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             self.train_phase = tf.placeholder(tf.bool, name="train_phase")
             self.weights = self._initialize_weights()
             # opt
-            _optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,
-                                                        epsilon=1e-8)
+            _optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,epsilon=1e-8)
             # multi-gpu
             self.models = []
             for gpu_id in range(self.gpu_num):
@@ -152,7 +154,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             self.merge_summary = tf.summary.merge_all()#调用sess.run运行图，生成一步的训练过程数据, 是一个option
             self.writer = tf.summary.FileWriter("./graphs", self.sess.graph)
             # Model: save model
-            self.saver = tf.train.Saver(max_to_keep=4)
+            self.saver = tf.train.Saver(max_to_keep=10)
             # init
             init = tf.global_variables_initializer()
             self.sess.run(init)
@@ -162,16 +164,18 @@ class DeepFM(BaseEstimator, TransformerMixin):
     def _initialize_weights(self):
         weights = dict()  # embeddings
         weights["feature_embeddings"] = tf.Variable(
-            tf.random_normal([self.feature_size, self.embedding_size], 0.0, 0.01),
+            tf.random_normal([self.feature_size, self.embedding_size], 0.0, 0.1),
             name="feature_embeddings")  # feature_size * K
         weights["feature_bias"] = tf.Variable(
             tf.random_uniform([self.feature_size, 1], 0.0, 1.0), name="feature_bias")  # feature_size * 1
         # deep layers
         num_layer = len(self.deep_layers)
-        input_size = self.field_size_total * self.embedding_size
-        glorot = np.sqrt(2.0 / (input_size + self.deep_layers[0]))
+        onehot_field_size = self.field_size - self.numeric_feature_size
+        deep_input_size = self.multi_hot_field_size+onehot_field_size
+        input_size_emb = deep_input_size * self.embedding_size + self.numeric_feature_size
+        glorot = np.sqrt(2.0 / (input_size_emb + self.deep_layers[0]))
         weights["layer_0"] = tf.Variable(
-            np.random.normal(loc=0, scale=glorot, size=(input_size, self.deep_layers[0])), dtype=np.float32,
+            np.random.normal(loc=0, scale=glorot, size=(input_size_emb, self.deep_layers[0])), dtype=np.float32,
             name="w_layer_0")
         weights["bias_0"] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(1, self.deep_layers[0])),
                                         dtype=np.float32, name="b_layer_0")  # 1 * layers[0]
@@ -186,10 +190,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
         # final concat projection layer
         # fm的y_first_order已经被提前求和了，所以只需要给它一个权重
         # （因为在weights["feature_bias"]中已经有部分作为“权重”乘上了y_first_order的特征值，然后求和，相当于每个一阶特征都有自己的隐向量x权重(来自w["feature_bias"])
-        input_size = 1 + self.embedding_size + self.deep_layers[-1]
-        glorot = np.sqrt(2.0 / (input_size + 1))
+        input_size_emb = 1 + self.embedding_size + self.deep_layers[-1]
+        glorot = np.sqrt(2.0 / (input_size_emb + 1))
         weights["concat_projection"] = tf.Variable(
-            np.random.normal(loc=0, scale=glorot, size=(input_size, 1)),
+            np.random.normal(loc=0, scale=glorot, size=(input_size_emb, 1)),
             dtype=np.float32, name="concat_projection")  # layers[i-1]*layers[i]
         weights["concat_bias"] = tf.Variable(tf.constant(0.01), dtype=np.float32, name="concat_bias")
         return weights
@@ -202,24 +206,28 @@ class DeepFM(BaseEstimator, TransformerMixin):
                       multi_hot_field_size):
         dropout_keep_fm = self.dropout_fm
         dropout_keep_deep = self.dropout_deep
-        field_size = self.field_size
+        numeric_field_size = self.numeric_feature_size
+        onehot_field_size = self.field_size - self.numeric_feature_size
+
         embedding_size = self.embedding_size
         deep_layers_activation = self.deep_layers_activation
         train_phase = self.train_phase
 
+        deep_input_size = multi_hot_field_size+onehot_field_size
         # ---------- FM component ---------
         with tf.name_scope("FM"):
             # ---------- first order term ----------
             with tf.name_scope("1st_order"):
                 y_first_order = tf.nn.embedding_lookup_sparse(weights["feature_bias"], sp_ids=feat_total_idx_sp,
                                                               sp_weights=feat_total_value_sp, combiner="sum")
-                y_first_order = tf.nn.dropout(y_first_order, dropout_keep_fm[0], name="y_first_order_dropout")  # None * F
+                y_first_order = tf.nn.dropout(y_first_order, dropout_keep_fm[0], name="y_first_order_dropout")
             # ---------- second order term ---------------
             with tf.name_scope("2nd_order"):
                 # sum_square part
-                summed_features_emb_square = tf.square(
-                    tf.nn.embedding_lookup_sparse(weights["feature_embeddings"], sp_ids=feat_total_idx_sp,
-                                                  sp_weights=feat_total_value_sp, combiner="sum"))
+                summed_features_emb_square = tf.square(tf.nn.embedding_lookup_sparse(weights["feature_embeddings"],
+                                                                                     sp_ids=feat_total_idx_sp,
+                                                                                     sp_weights=feat_total_value_sp,
+                                                                                     combiner="sum"))
                 # square_sum part
                 squared_sum_features_emb = tf.nn.embedding_lookup_sparse(tf.square(weights["feature_embeddings"]),
                                                                          sp_ids=feat_total_idx_sp,
@@ -232,9 +240,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
         with tf.name_scope("Deep"):
             # total_embedding 均值
             with tf.name_scope("total_emb"):
-                feat_one_hot = tf.sparse_add(feat_numeric_sp, feat_category_sp)
+                # feat_one_hot = tf.sparse_add(feat_numeric_sp, feat_category_sp)
+                feat_one_hot = feat_category_sp
                 one_hot_embeddings = tf.nn.embedding_lookup(weights["feature_embeddings"], feat_one_hot.indices[:,1])
-                one_hot_embeddings = tf.reshape(one_hot_embeddings,shape=(-1,field_size,embedding_size))
+                one_hot_embeddings = tf.reshape(one_hot_embeddings,shape=(-1,onehot_field_size,embedding_size))
                 multi_hot_embeddings = tf.nn.embedding_lookup_sparse(weights["feature_embeddings"],sp_ids=feat_multi_hot_idx_sp,sp_weights=feat_multi_hot_value_sp, combiner="mean")
                 multi_hot_embeddings = tf.reshape(multi_hot_embeddings,shape=[-1,1,embedding_size])
                 total_embeddings = tf.concat([one_hot_embeddings,multi_hot_embeddings], axis=1)
@@ -243,7 +252,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 # total_embeddings = tf.add(total_one_hot_embeddings,total_multi_hot_embeddings)
             # input
             with tf.name_scope("input"):
-                y_deep_input = tf.reshape(total_embeddings, shape=[-1, self.field_size_total*embedding_size])  # None * (F*K)
+                # 把连续特征不经过embedding直接输入到NN
+                feat_numeric_sp_dense = tf.cast(tf.reshape(feat_numeric_sp.values,shape=(-1,numeric_field_size)), tf.float32)
+                y_deep_input = tf.reshape(total_embeddings, shape=[-1, deep_input_size*embedding_size])  # None * (F*K)
+                y_deep_input = tf.concat([y_deep_input,feat_numeric_sp_dense],axis=1)
                 y_deep_input = tf.nn.dropout(y_deep_input, dropout_keep_deep[0])
             # layer0
             with tf.name_scope("layer0"):
@@ -393,26 +405,30 @@ class DeepFM(BaseEstimator, TransformerMixin):
             train_generator = data_generator.get_apus_ad_train_generator()
             t1 = time()
             batch_cnt = 0
+            loss_on_train = []
             while True:
                 batch_info = list(itertools.islice(train_generator,0,self.batch_size))
                 if len(batch_info)>0:
                     loss = self.fit_on_batch(batch_info=batch_info, batch_cnt=batch_cnt)
+                    loss_on_train.append(loss)
                     if batch_cnt % 100 == 0:
-                        train_mertic = self.evaluate_with_iter(iter(batch_info))
+                        avg_loss = sum(loss_on_train)/len(loss_on_train)
+                        loss_on_train = []
+                        train_mertic,_ = self.evaluate_with_iter(iter(batch_info))
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-                        print(now+": "+"[epoch:%02d] [batch:%05d] train-result: loss=%.4f auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, loss, train_mertic, time() - t1))
+                        print(now+": "+"[epoch:%02d] [batch:%05d] train-result: avg_loss=%.4f, last_loss=%.4f, cur_batch_auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, avg_loss, loss, train_mertic, time() - t1))
                         t1 = time()
                     if batch_cnt != 0 and batch_cnt % 2500 == 0:
                         # total is 51949610, batch_size = 9126, batch_cnt = 5637
                         t2 = time()
                         valid_info = data_generator.get_apus_ad_valid()
-                        valid_mertic = self.evaluate_with_iter(valid_info)
+                        valid_mertic,logloss_skl = self.evaluate_with_iter(valid_info)
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-                        print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, time() - t2))
+                        print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f, logloss_skl=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, logloss_skl, time() - t2))
                         if valid_mertic>max_auc:
                             max_auc = valid_mertic
-                            print("save model ...")
-                            self.saver.save(self.sess, "./apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
+                            print(now+": "+"save model ...")
+                            self.saver.save(self.sess, "./model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
                         t1 = time()
                 else:
                     break
@@ -420,13 +436,13 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 global_batch_cnt += 1
             t2 = time()
             valid_info = data_generator.get_apus_ad_valid()
-            valid_mertic = self.evaluate_with_iter(valid_info)
+            valid_mertic,logloss_skl  = self.evaluate_with_iter(valid_info)
             now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-            print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, time() - t2))
+            print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f, logloss_skl=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, logloss_skl, time() - t2))
             if valid_mertic>max_auc:
                 max_auc = valid_mertic
-                print("save model ...")
-                self.saver.save(self.sess, "./apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
+                print(now+": "+"save model ...")
+                self.saver.save(self.sess, "./model_dir/DeepFM_fieldMerge_model.ckpt", global_step=global_batch_cnt)
 
     def predict_with_iterator(self, iterator):
         y_pred = []
@@ -448,25 +464,28 @@ class DeepFM(BaseEstimator, TransformerMixin):
             else:
                 print("\n")
                 break
-            if sample_cnt % (100*10000) == 0:
-                sample_cnt += num_batch
-                sys.stdout.write(' '*20 + '\r')
-                sys.stdout.flush()
-                sys.stdout.write("已完成样本数: %s" % sample_cnt)
-                sys.stdout.flush()
+            # if sample_cnt % (100*10000) == 0:
+            #     sample_cnt += num_batch
+            #     sys.stdout.write(' '*20 + '\r')
+            #     sys.stdout.flush()
+            #     sys.stdout.write("已完成样本数: %s" % sample_cnt)
+            #     sys.stdout.flush()
         return y_pred,y
 
     def evaluate_with_iter(self, inp_iterator):
         y_pred,y = self.predict_with_iterator(inp_iterator)
+        y_pred = np.reshape(y_pred,newshape=(-1,))
+        y = np.reshape(y,newshape=(-1,))
         assert len(y) == len(y_pred), "y和y_pred长度不一样"
+        log_loss_skl = log_loss(y,y_pred)
         result = -1
         try:
             result = self.eval_metric(y, y_pred)
         except ValueError:
             print("only one class present in y_true")
-        return result
+        return result,log_loss_skl
 
-
+# other functions
 def timer(inp_func):
     @wraps(inp_func)
     def warpper(*args, **kw):
@@ -496,7 +515,6 @@ def replaced_gen_feed_dict(ori_function, self, y, Xi_numeric, Xv_numeric, Xi_cat
     end = time()
     print("gen_feed_dict, Elapsed Time: {time}, ".format(time=end-start))
     return result
-
 
 # DeepFM.fit_on_batch = debug_hook(DeepFM.fit_on_batch, replaced_fit_one_batch)  函数可以直接hook
 # DeepFM.gen_feed_dict = debug_hook(DeepFM.gen_feed_dict, replaced_gen_feed_dict)

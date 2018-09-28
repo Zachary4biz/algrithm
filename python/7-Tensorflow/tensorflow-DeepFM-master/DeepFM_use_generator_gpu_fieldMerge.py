@@ -1,11 +1,3 @@
-"""
-Tensorflow implementation of DeepFM [1]
-
-Reference:
-[1] DeepFM: A Factorization-Machine based Neural Network for CTR Prediction,
-    Huifeng Guo, Ruiming Tang, Yunming Yey, Zhenguo Li, Xiuqiang He.
-"""
-
 import numpy as np
 import tensorflow as tf
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -21,7 +13,6 @@ from functools import wraps
 from tensorflow.python import debug as tf_debug
 
 ###########
-# scp到GPU服务器
 #    scp /Users/zac/5-Algrithm/python/7-Tensorflow/tensorflow-DeepFM-master/DeepFM_use_generator_gpu_fieldMerge.py 192.168.0.253:/home/zhoutong/python3/lib/python3.6/site-packages/
 ###########
 
@@ -46,15 +37,14 @@ class DeepFM(BaseEstimator, TransformerMixin):
                  loss_type="logloss", eval_metric=roc_auc_score,
                  l2_reg=0.0, greater_is_better=True,gpu_num=1,is_debug=False):
         assert (use_fm or use_deep)
-        assert loss_type in ["logloss", "mse"],"loss_type can be either 'logloss' for classification task or 'mse' for regression task"
 
-        self.feature_size = feature_size        # denote as M, size of the feature dictionary
-        self.embedding_size = embedding_size    # denote as K, size of the feature embedding
+        self.feature_size = feature_size
+        self.embedding_size = embedding_size
         self.one_hot_field_size = one_hot_field_size
         self.multi_hot_field_size = multi_hot_field_size
         self.numeric_field_size = numeric_field_size
 
-        self.dropout_fm = dropout_fm
+        self.dropout_fm = dropout_fm # abort
         self.deep_layers = deep_layers
         self.dropout_deep = dropout_deep
         self.deep_layers_activation = deep_layers_activation
@@ -310,7 +300,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             out = tf.add(tf.matmul(concat_input, weights["concat_projection"]), weights["concat_bias"])
 
         return tf.nn.sigmoid(out)
-
+    # 暂时停止l2
     def batch_norm_layer(self, x, train_phase, scope_bn):
         bn_train = batch_norm(x, decay=self.batch_norm_decay, center=True, scale=True, updates_collections=None,
                               is_training=True, reuse=None, trainable=True, scope=scope_bn)
@@ -332,6 +322,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             average_grads.append(grad_and_var)
         return average_grads
 
+    # 构造 feed_dict
     def gen_feed_dict(self, y_inp, Xi_numeric_inp, Xv_numeric_inp, Xi_category_inp, Xv_category_inp, Xi_multi_hot_app_inp, Xv_multi_hot_app_inp, Xi_multi_hot_tag_inp, Xv_multi_hot_tag_inp, train_phase):
         feature_size = self.feature_size
         gpu_num = self.gpu_num
@@ -532,10 +523,10 @@ class DeepFM(BaseEstimator, TransformerMixin):
         try:
             result = self.eval_metric(y, y_pred)
         except ValueError:
-            print("only one class present in y_true")
+            print("y_true仅一类样本")
         return result,log_loss_skl
 
-# other functions
+# hook functions
 def timer(inp_func):
     @wraps(inp_func)
     def warpper(*args, **kw):

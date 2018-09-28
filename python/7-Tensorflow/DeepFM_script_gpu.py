@@ -13,7 +13,6 @@ import os
 
 ########
 # 单机试运行 GPU DeepFM模型: https://github.com/ChenglongChen/tensorflow-DeepFM
-# scp文件到 GPU 服务器
 #   scp /Users/zac/5-Algrithm/python/7-Tensorflow/DeepFM_script_gpu.py 192.168.0.253:/home/zhoutong/py_script
 ########
 
@@ -298,7 +297,6 @@ def apus_ad_multi_hot(inp_path_train, inp_path_valid):
     print_t("params:")
     for k, v in dfm_params_local.items():
         print_t("   %s : %s" % (str(k), str(v)))
-
 
      ###### 使用一天的数据
     # path_train = "/home/zhoutong/data/apus_ad/apus_ad_feature_train"

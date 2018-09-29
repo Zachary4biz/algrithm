@@ -13,6 +13,9 @@ from functools import wraps
 from tensorflow.python import debug as tf_debug
 
 ###########
+# 模型图及保存
+# multi-gpu
+# debug_log (tf.Print)
 #    scp /Users/zac/5-Algrithm/python/7-Tensorflow/tensorflow-DeepFM-master/DeepFM_use_generator_gpu_fieldMerge.py 192.168.0.253:/home/zhoutong/python3/lib/python3.6/site-packages/
 ###########
 
@@ -26,7 +29,7 @@ def debug_log(text):
 
 class DeepFM(BaseEstimator, TransformerMixin):
     def __init__(self, feature_size, numeric_field_size,one_hot_field_size,multi_hot_field_size,
-                 embedding_size=8, dropout_fm=[1.0, 1.0],
+                 embedding_size=8, dropout_fm=[1.0, 1.0],fraction=0.1,
                  deep_layers=[32, 32], dropout_deep=[0.5, 0.5, 0.5],
                  deep_layers_activation=tf.nn.relu,
                  epoch=10, batch_size=256,
@@ -479,7 +482,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             valid_info = data_generator.get_apus_ad_valid()
             valid_mertic,logloss_skl  = self.evaluate_with_iter(valid_info)
             now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-            print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d] train-result: auc=%.4f, logloss_skl=%.4f [%.1f s]" % (epoch + 1, batch_cnt, valid_mertic, logloss_skl, time() - t2))
+            print(now+": "+"[valid-evaluate] [epoch:%02d] [batch:%05d | global_batch:%05d] train-result: auc=%.4f, logloss_skl=%.4f [%.1f s]" % (epoch + 1, batch_cnt, global_batch_cnt, valid_mertic, logloss_skl, time() - t2))
             if valid_mertic>max_auc:
                 max_auc = valid_mertic
                 print(now+": "+"save model ...")

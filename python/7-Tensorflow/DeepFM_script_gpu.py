@@ -150,19 +150,31 @@ class DataGenerator(object):
             lalbel = int(info[2])
             y_v.append([lalbel])
         return Xi_v, Xv_v, y_v
-# 顺序按连续特征索引的顺序来,依次表示 0 1 2 三个连续特征的最大值
-global_max_numeric = [999, 10001, 13]
-global_feature_size = 189052 + 1
-global_numeric_field_size = 3
-global_one_hot_field_size = 25
-global_multi_hot_field_size = 2
-global_neg_valid = 13633804
-global_pos_valid = 7901557
-global_neg_train = 43228411
-global_pos_train = 22784935
 
-global_path_train = "/home/zhoutong/data/apus_ad/data_2018-08-20_to_2018-09-09_sampled/data_2018-08-20_to_2018-09-09_sampled_train"
-global_path_valid = "/home/zhoutong/data/apus_ad/data_2018-08-20_to_2018-09-09_sampled/data_2018-08-20_to_2018-09-09_sampled_valid"
+
+
+# 顺序按连续特征索引的顺序来,依次表示 0 1 2 三个连续特征的最大值
+# global_max_numeric = [999, 10001, 13]
+# global_feature_size = 189052 + 1
+# global_numeric_field_size = 3
+# global_one_hot_field_size = 25
+# global_multi_hot_field_size = 2
+# global_neg_valid = 13633804
+# global_pos_valid = 7901557
+# global_neg_train = 43228411
+# global_pos_train = 22784935
+base_p = "/home/zhoutong/data/apus_ad/data_2018-09-21_to_2018-09-26"
+with open(base_p + "/info.json", "r+") as f:
+    info = eval(f.readlines()[0].strip())
+global_max_numeric = [x[1] for x in sorted(map(lambda x: (int(x[0]), int(x[1])), info['numeric_max_v'].items()), key=lambda x: x[0])]
+global_feature_size = info['feature_size'] + 1
+global_numeric_field_size = info['numeric_f_size']
+global_multi_hot_field_size = info['multi_hot_f_size']
+global_one_hot_field_size = info['field_size'] - info['numeric_f_size'] - info['multi_hot_f_size']
+
+
+global_path_train = base_p+"/2018-09-21_to_2018-09-25"
+global_path_valid = base_p+"/2018-09-26_to_2018-09-26"
 
 def print_t(param):
     sys.stdout.flush()
@@ -179,8 +191,8 @@ def pre_data(inp_path_train, inp_path_valid):
             for line in f:
                 yield line
     # 正负样本存成两个文件,在原始目录下创建了一个新的 tmp 文件夹,存放了pos neg的单独文件
-    def split_as_pos_and_neg(save_path, data_g):
-        directory,filename = os.path.split(save_path)
+    def split_as_pos_and_neg(ori_path_to_split, data_g):
+        directory,filename = os.path.split(ori_path_to_split)
         new_save_dir = directory+"/tmp"
         if not os.path.exists(new_save_dir): os.mkdir(new_save_dir)
         new_save_path = new_save_dir+"/"+filename
@@ -201,8 +213,9 @@ def pre_data(inp_path_train, inp_path_valid):
         while True:
             sample_list_raw = list(itertools.islice(data_g, 0, batch_size))
             # 去除掉广告底价为0的,这是异常数据大约15w/1400w条
-            sample_list = list(filter(filter_sample, sample_list_raw))
-            abnormal_to_drop += len(sample_list_raw) - len(sample_list)
+            # sample_list = list(filter(filter_sample, sample_list_raw))
+            sample_list = sample_list_raw
+            # abnormal_to_drop += len(sample_list_raw) - len(sample_list)
             if len(sample_list) > 0:
                 pos=[i for i in filter(lambda x: x.strip("[]\n").split("\t")[0] == '1', sample_list)]
                 pos_cnt += len(pos)
@@ -214,10 +227,10 @@ def pre_data(inp_path_train, inp_path_valid):
                 break
         f_train_pos.close()
         f_train_neg.close()
-        print("abnormal_to_drop 广告底价为0的作为异常数据丢弃,共计 %s条" % abnormal_to_drop)
+        # print("abnormal_to_drop 广告底价为0的作为异常数据丢弃,共计 %s条" % abnormal_to_drop)
         return new_save_path,pos_cnt,neg_cnt
     # 正负样本按比例各取多少写入同一个文件中
-    def merge_shuffled_neg_pos_to_one(path, reader_path, r_pos,r_neg):
+    def merge_shuffled_neg_pos_to_one(save_path, reader_path, r_pos, r_neg):
         neg_ge = _yield_apus_ad_generator(reader_path=reader_path + "_shuffled_neg") # 17275518 (0.6705
         pos_ge = _yield_apus_ad_generator(reader_path=reader_path + "_shuffled_pos") # 8488319 (0.3294
         # 正样本负样本的比例需要传入,两者加和为1,通常由于正样本比较珍贵,要减少对正样本的丢弃
@@ -228,7 +241,7 @@ def pre_data(inp_path_train, inp_path_valid):
         import itertools
         import random
         import math
-        with open(path + "_shuffled", "w+") as f:
+        with open(save_path, "w+") as f:
             dropped_pos,dropped_neg = 0,0
             while True:
                 pos = list(itertools.islice(pos_ge, 0, math.ceil(1024 * r_pos_)))
@@ -256,9 +269,9 @@ def pre_data(inp_path_train, inp_path_valid):
     train_generator = _yield_apus_ad_generator(reader_path=inp_path_train)
     valid_info = _yield_apus_ad_generator(reader_path=inp_path_valid)
     t1=time.time()
-    tmpfile_path_train, pos_cnt_train, neg_cnt_train = split_as_pos_and_neg(save_path=inp_path_train, data_g=train_generator)
+    tmpfile_path_train, pos_cnt_train, neg_cnt_train = split_as_pos_and_neg(ori_path_to_split=inp_path_train, data_g=train_generator)
     t2=time.time()
-    tmpfile_path_valid, pos_cnt_valid, neg_cnt_valid = split_as_pos_and_neg(save_path=inp_path_valid, data_g=valid_info)
+    tmpfile_path_valid, pos_cnt_valid, neg_cnt_valid = split_as_pos_and_neg(ori_path_to_split=inp_path_valid, data_g=valid_info)
     t3=time.time()
     print("拆成正负样本两个文件耗时\n","训练集: ",t2-t1,"    测试集: ", t3-t2)
     print("""
@@ -266,9 +279,9 @@ def pre_data(inp_path_train, inp_path_valid):
     验证集: [pos] %s [neg] %s [耗时] %s
     """ % (pos_cnt_train, neg_cnt_train, t2-t1, pos_cnt_valid, neg_cnt_valid, t3-t2))
     print("处理验证集")
-    merge_shuffled_neg_pos_to_one(inp_path_valid, tmpfile_path_valid, r_pos=1.0 * pos_cnt_valid / (neg_cnt_valid + pos_cnt_valid), r_neg=1.0 * neg_cnt_valid / (neg_cnt_valid + pos_cnt_valid))
+    merge_shuffled_neg_pos_to_one(inp_path_valid+ "_shuffled", tmpfile_path_valid, r_pos=1.0 * pos_cnt_valid / (neg_cnt_valid + pos_cnt_valid), r_neg=1.0 * neg_cnt_valid / (neg_cnt_valid + pos_cnt_valid))
     print("处理训练集")
-    merge_shuffled_neg_pos_to_one(inp_path_train, tmpfile_path_train, r_pos=1.0 * pos_cnt_train / (neg_cnt_train + pos_cnt_train), r_neg=1.0 * neg_cnt_train / (pos_cnt_train + neg_cnt_train))
+    merge_shuffled_neg_pos_to_one(inp_path_train+ "_shuffled", tmpfile_path_train, r_pos=1.0 * pos_cnt_train / (neg_cnt_train + pos_cnt_train), r_neg=1.0 * neg_cnt_train / (pos_cnt_train + neg_cnt_train))
 
 def apus_ad_multi_hot(inp_path_train, inp_path_valid):
     dfm_params_local = {
@@ -276,7 +289,7 @@ def apus_ad_multi_hot(inp_path_train, inp_path_valid):
         "use_deep": True,
         "embedding_size": 60,# 5 15 论文只使用了10
         "dropout_fm": [1.0, 1.0], # 当前的实现不能使用fm的dropout了,因为稀疏向量直接进行了combiner的sum或者mean,变成了一个元
-        "deep_layers": [400, 400, 400, 400], # 华为的结论是每层200~400个神经元,给3~5层,而网络结构是constant最优(每层个数相同)
+        "deep_layers": [1024, 512, 256, 128], # 华为的结论是每层200~400个神经元,给3~5层,而网络结构是constant最优(每层个数相同)
         "dropout_deep": [0.8, 1.0, 1.0, 1.0, 0.9], # 按华为论文里的结果,dropout在0.6~0.9之间能让模型效果提升,他们的是0.9最优
         "deep_layers_activation": tf.nn.relu,
         "epoch": 10,
@@ -327,14 +340,19 @@ def apus_ad_multi_hot(inp_path_train, inp_path_valid):
     print_t("time elapse : %s s" % (time_e - time_b))
 
 if __name__ == '__main__':
-    ######
-    # run
-    ######
+    # 数据预处理
     file_exists = os.path.exists(global_path_valid + "_shuffled") and os.path.exists(global_path_train + "_shuffled")
     if not file_exists : pre_data(global_path_train, global_path_valid)
+    # 禁用GPU
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    # 训练模型
     apus_ad_multi_hot(global_path_train + "_shuffled", global_path_valid + "_shuffled")
 
 class InferenceWithFile(object):
+    def __init__(self,ckpt_path):
+        self.ckpt_path = ckpt_path
+
     @staticmethod
     def resotre(inp_ckpt_path):
         # 使用持久化的模型文件进行预测
@@ -406,9 +424,9 @@ class InferenceWithFile(object):
                      "tower_0/gpu_variables/feat_multi_hot_value_sp_tag/indices:0": multi_hot_value_sp_tag.indices,
                      "train_phase:0": False}
         return feed_dict
-    @staticmethod
-    def loadDict(ckpt_path, path_valid_, path_train=""):
-        sess,graph = InferenceWithFile.resotre(ckpt_path)
+
+    def inference(self, path_valid_, path_train=""):
+        sess,graph = self.resotre(self.ckpt_path)
         data_generator = DataGenerator(train_path=path_train, valid_path=path_valid_, max_numeric=global_max_numeric)
         valid_generator = data_generator.get_apus_ad_valid()
         y_ = np.array([])
@@ -422,7 +440,7 @@ class InferenceWithFile(object):
             if len(data_as_list) > 0:
                 y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot,Xi_multi_hot_tag,Xv_multi_hot_tag = (np.array(x) for x in
                                                                                                    zip(*data_as_list))
-                feed_dict_ = InferenceWithFile.gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot, Xi_multi_hot_tag,Xv_multi_hot_tag)
+                feed_dict_ = self.gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot,Xi_multi_hot_tag,Xv_multi_hot_tag)
                 out_batch = sess.run(graph.get_tensor_by_name("all_pred_reshape_out:0"), feed_dict=feed_dict_)
                 out_=np.concatenate((out_,np.reshape(out_batch,newshape=(-1))))
                 y_ = np.concatenate((y_,np.reshape(y,newshape=(-1))))
@@ -440,6 +458,11 @@ class InferenceWithFile(object):
         print("load model from file \n auc: %.5f, loss: %.5f" % (auc_,loss_))
         return auc_,loss_,out_,y_
 
+    # 需要做纠偏; 输入需要支持原始数据
+    def inference_2(self, path_valid):
+
+        pass
+
 def useInference():
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # 禁用GPU
@@ -452,7 +475,8 @@ def useInference():
     # model_ckpt_path = "/home/zhoutong/py_script/apud_ad_model__sample_auc_7192_normalized/DeepFM_fieldMerge_model.ckpt-8228"
     # model_ckpt_path = "/home/zhoutong/DeepFM/apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt-5000"
     # print_tensors_in_checkpoint_file(model_ckpt_path, tensor_name=None, all_tensors=False)
-    auc, loss, out, y_inferenced = InferenceWithFile.loadDict(model_ckpt_path, path_valid)
+    inferer = InferenceWithFile(model_ckpt_path)
+    auc, loss, out, y_inferenced = inferer.inference(path_valid)
     print("load model from file \n auc: %.5f, loss: %.5f" % (auc,loss))
 
 

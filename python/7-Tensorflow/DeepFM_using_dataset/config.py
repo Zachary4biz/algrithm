@@ -6,7 +6,7 @@ import json
 #***** 存跃的数据（midas） *****
 class config_midas(object):
     # input
-    _basePath = "/home/zhoutong/data/apus_ad/tfrecord_2018-09-21_to_2018-10-04_and_2018-10-05_to_2018-10-11"
+    _basePath = "/home/zhoutong/data/apus_ad/starksdk/tfrecord_2018-09-10_to_2018-09-24_and_2018-09-25_to_2018-10-01_intersectLR"
     train_tfrecord_file = _basePath+"/train.tfrecord.gz"
     valid_tfrecord_file = _basePath+"/valid.tfrecord.gz"
     info_file = _basePath+"/info.json"
@@ -30,7 +30,6 @@ class config_midas(object):
         "global_all_fields" : list(filter(lambda x: x!="", fieldInfo['all_fields'].split(","))),
         "tmp_map_num_f": result['numericFieldMap'],
         "max_numeric" : result['numericMax']
-
     }
     # 如果没有使用numeric 或者 multi_hot特征,会自动构造一个不起作用的numeric(multi_hot)特征,所以size要置为1
     data_param_dicts["numeric_field_size"] = len(data_param_dicts['global_numeric_fields']) if len(data_param_dicts['global_numeric_fields']) >0 else 1
@@ -41,7 +40,7 @@ class config_midas(object):
     deepfm_param_dicts = {
         "dropout_fm" : [1.0, 1.0],
         "dropout_deep" : [0.8, 0.9, 0.9, 0.9, 0.9],
-        "feature_size ": statisticInfo['feature_size']+1,
+        "feature_size": statisticInfo['feature_size']+1,
         "batch_size":1024*3,
         "embedding_size": 2,
         "epoch":8,

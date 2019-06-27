@@ -33,7 +33,7 @@ def log_3(text):
     def decorator_func(func):
         @functools.wraps(func)
         def wrapper(*args, **kw):
-            print("显示log_2接受的参数: %s, 再执行函数: %s" % (text, func.__name__))
+            print("显示log_3接受的参数: %s, 再执行函数: %s" % (text, func.__name__))
             result = func(*args, **kw)
             print("函数执行完毕")
             return result
@@ -52,8 +52,8 @@ def today_use_log_2():
     print(datetime.date.today())
 
 @log_3("'info_before_apply_func'")
-def today_use_log_3():
-    print(datetime.date.today())
+def today_use_log_3(a,b):
+    print(datetime.date.today(),a,b)
 
 
 print("=======> 直接调用函数 today :")
@@ -64,15 +64,16 @@ print("\n=======> 函数定义前添加接受自定义参数的decorator :")
 today_use_log_2()
 print("函数签名是: %s" % today_use_log_2.__name__)
 print("\n=======> 保持原函数签名不变,函数定义前添加接受自定义参数的decorator :")
-today_use_log_3()
+today_use_log_3(1,10)
 print("函数签名是: %s" % today_use_log_3.__name__)
 
 # =============== hook 已有的函数
 def wrap_func(ori_func,new_func):
     @functools.wraps(ori_func)
-    def run(*args,**kwargs):
+    def run(*args, **kwargs):
         return new_func(ori_func, *args, **kwargs)
     return run
+#  1--- 随便某个函数
 def replaced_func(ori_function, parameter):
     # 处理参数,如乘2倍
     new_params = parameter * 2
@@ -82,13 +83,7 @@ def target_func(cnt):
 print("替换为replaced_func前的运行: target_func(2)=%s, 函数签名: %s" % (target_func(2), target_func.__name__))
 target_func = wrap_func(target_func,replaced_func)
 print("hook 之后: target_func(2)=%s, 函数签名: %s" % (target_func(2), target_func.__name__))
-
-
-def wrap_print(ori_func, new_func):
-    @functools.wraps(ori_func)
-    def run(*args, **kwargs):
-        return new_func(ori_func, *args, **kwargs)
-    return run
+#   2--- hook print函数
 def replaced_print(ori_function, parameter):
     now = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time()))
     new_params = now+": "+parameter

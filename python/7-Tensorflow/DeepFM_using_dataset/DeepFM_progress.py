@@ -25,8 +25,8 @@ from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 CONFIG = config_midas()
 
 print("info.json is :")
-with open(CONFIG.info_file, "r+") as f:
-    info = f.readlines()
+with open(CONFIG.info_file, "r+") as configFile:
+    info = configFile.readlines()
     result = json.loads(info)
     for key,value in result:
         print("    ",key,"=",value)
@@ -52,11 +52,11 @@ def get_iterator(tfrecord_path,global_all_fields,global_multi_hot_fields,global_
                 feature_structure[field]=tf.FixedLenFeature([], dtype=tf.int64)
         parsed_features = tf.parse_single_example(serialized_example, feature_structure)
         return parsed_features
-    # 连续特征归一化
+    # 连续特征归一化 | 考虑特征不会出现负数，如果最大值就是0那么这个特征全为0，归一化就直接取0
     def _normalize(parsed_features):
         for num_f in global_numeric_fields:
             max_v = max_numeric[num_f]
-            parsed_features[num_f] = parsed_features[num_f] / max_v - 0.5
+            parsed_features[num_f] = parsed_features[num_f] / max_v - 0.5 if max_v!=0 else 0
         return parsed_features
     # 把连续特征的idx加进去，跟样本一起出现batch_size次
     def _add_idx_of_numeric(parsed_features):
@@ -80,9 +80,8 @@ class DeepFM(object):
                  random_seed,base_save_dir,deepfm_param_dicts,data_param_dicts):
         # 普通参数
         self.random_seed = random_seed
-        tagTime= time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time()))
-        self.model_save_dir = base_save_dir+"/dt=%s/%s".format(tagTime,"model")
-        self.summary_save_dir = base_save_dir+"/dt=%s/%s".format(tagTime,"summary")
+        self.model_save_dir = base_save_dir+"/model"
+        self.summary_save_dir = base_save_dir+"/summary"
         # TFRecord路径
         self.train_tfrecord_file = train_tfrecord_file
         self.valid_tfrecord_file = valid_tfrecord_file
@@ -431,10 +430,17 @@ class DeepFM(object):
             inp_next_dict = inp_iterator.get_next()
             # prepare
             # inp_next_dict     key: decode时使用的字符串，value: tensor
+            #                   目的: 这个是iterator的next(get_next)结果
+            #                   示例: key: 'stat_ad_creative_id_s__cvr_3d'
+            #                        value: <tf.Tensor 'IteratorGetNext:57' shape=(3072,) dtype=int32>
             # placeholder_dict  key: decode时使用的字符串，value: placeholder
             #                   目的：为了让后面的流程都使用placeholder进行,这样存储模型可以以这些placeholder为输入口
+            #                   示例: key: 'ad_info__ad_creative_id_s'
+            #                        value: <tf.Tensor 'input/ad_info__ad_creative_id_s:0' shape=<unknown> dtype=int64>,
             # ori_feed_dict     key: placeholder        value: tensor
             #                   目的：直接sess.run(ori_feed_dict)就可以得到后续流程需要的placeholder的feed_dict;
+            #                   示例: key: <tf.Tensor 'input/ad_info__ad_creative_id_s:0' shape=<unknown> dtype=int64>
+            #                        value: <tf.Tensor 'IteratorGetNext:1' shape=(3072,) dtype=int64>
             # 构造placeholder输入，方便模型文件restore后的使用
             # 这里实际上只是把 inp_next 这个“源字典”的 value 都用placeholder替换了，key未变
             placeholder_dict = {}
@@ -548,7 +554,7 @@ class DeepFM(object):
                         run_ops=[self.optimize_op,self.loss_op,self.pred,self.label_op,self.merge_summary]
                         run_result = sess.run(run_ops,train_feed)
                         _,loss_,pred_,label_,merge_summary_ = run_result
-                        self.writer.add_summary(merge_summary_,batch_cnt)
+                        self.writer.add_summary(merge_summary_,global_batch_cnt)
                         if batch_cnt % 100 == 0:
                             auc = roc_auc_score(label_,pred_)
                             batch_time = time.time()-t0

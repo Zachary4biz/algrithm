@@ -33,7 +33,7 @@ else:
         channel_keys=data[i].keys()
         for j in channel_keys:
             channel_info = channel_info_dict[j]
-            if '预装'.decode('utf-8') in channel_info['group_name']:
+            if '预装'.decode('utf-8') in chFannel_info['group_name']:
                 pre_install_channel.append(i+","+channel_info['channel'])
 
 print("save pre-install channel...")

@@ -9,7 +9,7 @@ from tensorflow.contrib.layers.python.layers import batch_norm as batch_norm
 import math
 import itertools
 from tensorflow.python.client import timeline
-from functools import wraps
+from functools import wraps,reduce
 from tensorflow.python import debug as tf_debug
 
 ###########
@@ -62,7 +62,6 @@ class DeepFM(BaseEstimator, TransformerMixin):
 
         self.batch_norm_decay = batch_norm_decay
 
-        self.verbose = verbose
         self.random_seed = random_seed
         self.loss_type = loss_type
         self.eval_metric = eval_metric
@@ -95,7 +94,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             # opt
             _optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,epsilon=1e-8)
             # multi-gpu
-            self.models = []
+            self.models_placeholders_output = []
             for gpu_id in range(self.gpu_num):
                 with tf.device('/gpu:%d' % gpu_id):
                     with tf.name_scope('tower_%d' % gpu_id):
@@ -103,23 +102,18 @@ class DeepFM(BaseEstimator, TransformerMixin):
                             prefix = "tower_%d" % gpu_id
                             feat_numeric_sp = tf.sparse_placeholder(tf.float32, name="feat_numeric_sp")
                             feat_category_sp = tf.sparse_placeholder(tf.float32, name="feat_category_sp")
-                            feat_multi_hot_idx_sp_app = tf.sparse_placeholder(tf.int32, name="feat_multi_hot_idx_sp_app")
-                            feat_multi_hot_value_sp_app = tf.sparse_placeholder(tf.float32, name="feat_multi_hot_value_sp_app")
-                            feat_multi_hot_idx_sp_tag = tf.sparse_placeholder(tf.int32, name="feat_multi_hot_idx_sp_tag")
-                            feat_multi_hot_value_sp_tag = tf.sparse_placeholder(tf.float32, name="feat_multi_hot_value_sp_tag")
+                            feat_multi_hot_idx_sp_list = [tf.sparse_placeholder(tf.int32, name="feat_multi_hot_idx_sp_%s" % i) for i in range(self.multi_hot_field_size)]
+                            feat_multi_hot_value_sp_list = [tf.sparse_placeholder(tf.int32, name="feat_multi_hot_value_sp_%s" % i) for i in range(self.multi_hot_field_size)]
                             feat_total_idx_sp = tf.sparse_placeholder(tf.int32, name="feat_total_idx_sp")
                             feat_total_value_sp = tf.sparse_placeholder(tf.float32, name="feat_total_value_sp")
 
                             pred = self.deep_fm_graph(weights=self.weights,
-                                                      feat_multi_hot_idx_sp_app=feat_multi_hot_idx_sp_app,
-                                                      feat_multi_hot_value_sp_app=feat_multi_hot_value_sp_app,
-                                                      feat_multi_hot_idx_sp_tag=feat_multi_hot_idx_sp_tag,
-                                                      feat_multi_hot_value_sp_tag=feat_multi_hot_value_sp_tag,
+                                                      feat_multi_hot_idx_sp_list= feat_multi_hot_idx_sp_list,
+                                                      feat_multi_hot_value_sp_list= feat_multi_hot_value_sp_list,
                                                       feat_numeric_sp=feat_numeric_sp,
                                                       feat_category_sp=feat_category_sp,
                                                       feat_total_idx_sp=feat_total_idx_sp,
-                                                      feat_total_value_sp=feat_total_value_sp,
-                                                      multi_hot_field_size=self.multi_hot_field_size)
+                                                      feat_total_value_sp=feat_total_value_sp)
 
                             label =  tf.placeholder(tf.float32, shape=[None, 1], name=prefix+"_label")  # None * 1
                             loss = tf.reduce_mean(tf.losses.log_loss(label, pred))
@@ -129,13 +123,13 @@ class DeepFM(BaseEstimator, TransformerMixin):
                             #     for i in range(len(self.deep_layers)):loss += tf.contrib.layers.l2_regularizer(self.l2_reg)(self.weights["layer_%d"%i])
 
                             grads = _optimizer.compute_gradients(loss)
-                            self.models.append((feat_numeric_sp,feat_category_sp,
-                                                feat_multi_hot_idx_sp_app,feat_multi_hot_value_sp_app,
-                                                feat_multi_hot_idx_sp_tag,feat_multi_hot_value_sp_tag,
-                                                feat_total_idx_sp,feat_total_value_sp,
-                                                label,pred,loss,grads))
+                            self.models_placeholders_output.append((feat_numeric_sp, feat_category_sp,
+                                                                    feat_multi_hot_idx_sp_list,
+                                                                    feat_multi_hot_value_sp_list,
+                                                                    feat_total_idx_sp, feat_total_value_sp,
+                                                                    label, pred, loss, grads))
 
-            _, _, _, _, _, _, _, _, _, tower_preds, tower_losses, tower_grads = zip(*self.models)
+            tower_preds, tower_losses, tower_grads = list(zip(*self.models_placeholders_output))[-3:]
 
             all_pred = tf.reshape(tf.concat(tower_preds, 0), [-1,1], name="all_pred_reshape_out")
             aver_loss_op = tf.reduce_mean(tower_losses)
@@ -165,40 +159,56 @@ class DeepFM(BaseEstimator, TransformerMixin):
             init = tf.global_variables_initializer()
             self.sess.run(init)
 
-            # self.sess = tf_debug.LocalCLIDebugWrapperSession(self.sess)
+            total_parameters = 0
+            for variable in self.weights.values():
+                shape = variable.get_shape()
+                variable_parameters = 1
+                for dim in shape:
+                    variable_parameters *= dim.value
+                total_parameters += variable_parameters
+            print("#" * 40)
+            print("total_parameters is %s" % total_parameters)
 
     def _initialize_weights(self):
+        multi_hot_field_size = self.multi_hot_field_size
+        one_hot_field_size = self.one_hot_field_size
+        numeric_field_size = self.numeric_field_size
+        feature_size = self.feature_size
+        embedding_size = self.embedding_size
+        deep_layers = self.deep_layers
+
         weights = dict()
         # embeddings
         weights["feature_embeddings"] = tf.Variable(
-            tf.random_normal([self.feature_size, self.embedding_size], 0.0, 0.1),
+            tf.random_normal([feature_size, embedding_size], 0.0, 0.1),
             name="feature_embeddings")  # feature_size * K
         # FM first-order weights
         weights["feature_bias"] = tf.Variable(
-            tf.random_uniform([self.feature_size, 1], 0.0, 1.0), name="feature_bias")  # feature_size * 1
+            tf.random_uniform([feature_size, 1], 0.0, 1.0), name="feature_bias")  # feature_size * 1
         # deep layers
         # 总输入元个数为 : (涉及emb的特征个数) * embedding_size + 连续特征个数
-        input_size_emb = (self.multi_hot_field_size+self.one_hot_field_size) * self.embedding_size + self.numeric_field_size
-        glorot = np.sqrt(2.0 / (input_size_emb + self.deep_layers[0]))
+        input_size_emb = (multi_hot_field_size+one_hot_field_size) * embedding_size + numeric_field_size
+        glorot = np.sqrt(2.0 / (input_size_emb + deep_layers[0]))
         weights["layer_0"] = tf.Variable(
-            np.random.normal(loc=0, scale=glorot, size=(input_size_emb, self.deep_layers[0])), dtype=np.float32,
+            initial_value=np.random.normal(loc=0, scale=glorot, size=(input_size_emb, deep_layers[0])),
+            dtype=np.float32,
             name="w_layer_0")
-        weights["bias_0"] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(1, self.deep_layers[0])),
+        weights["bias_0"] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(1, deep_layers[0])),
                                         dtype=np.float32, name="b_layer_0")  # 1 * layers[0]
-        for i in range(1, len(self.deep_layers)):
-            glorot = np.sqrt(2.0 / (self.deep_layers[i - 1] + self.deep_layers[i]))
+        for i in range(1, len(deep_layers)):
+            glorot = np.sqrt(2.0 / (deep_layers[i - 1] + deep_layers[i]))
             weights["layer_%d" % i] = tf.Variable(
-                np.random.normal(loc=0, scale=glorot, size=(self.deep_layers[i - 1], self.deep_layers[i])),
+                np.random.normal(loc=0, scale=glorot, size=(deep_layers[i - 1], deep_layers[i])),
                 dtype=np.float32, name="w_layer_%d" % i)  # layers[i-1] * layers[i]
             weights["bias_%d" % i] = tf.Variable(
-                np.random.normal(loc=0, scale=glorot, size=(1, self.deep_layers[i])),
+                np.random.normal(loc=0, scale=glorot, size=(1, deep_layers[i])),
                 dtype=np.float32, name="b_layer_%d" % i)  # 1 * layer[i]
         # final concat projection layer
         ################
         # fm的y_first_order已经被提前求和了，所以只需要给它一个权重
         # （因为在weights["feature_bias"]中已经有部分作为“权重”乘上了y_first_order的特征值，然后求和，相当于每个一阶特征都有自己的隐向量x权重(来自w["feature_bias"])
         ################
-        cocnat_input_size_emb = 1 + self.embedding_size + self.deep_layers[-1]
+        cocnat_input_size_emb = 1 + embedding_size + deep_layers[-1]
         glorot = np.sqrt(2.0 / (cocnat_input_size_emb + 1))
         weights["concat_projection"] = tf.Variable(
             np.random.normal(loc=0, scale=glorot, size=(cocnat_input_size_emb, 1)),
@@ -209,21 +219,19 @@ class DeepFM(BaseEstimator, TransformerMixin):
     def deep_fm_graph(self,
                       weights,
                       feat_total_idx_sp, feat_total_value_sp,
-                      feat_multi_hot_idx_sp_app, feat_multi_hot_value_sp_app,
-                      feat_multi_hot_idx_sp_tag, feat_multi_hot_value_sp_tag,
-                      feat_numeric_sp, feat_category_sp,
-                      multi_hot_field_size):
+                      feat_multi_hot_idx_sp_list, feat_multi_hot_value_sp_list,
+                      feat_numeric_sp, feat_category_sp):
         dropout_keep_fm = self.dropout_fm
         dropout_keep_deep = self.dropout_deep
         numeric_feature_size = self.numeric_field_size
         onehot_field_size = self.one_hot_field_size
-
+        multi_hot_field_size = self.multi_hot_field_size
         embedding_size = self.embedding_size
         deep_layers_activation = self.deep_layers_activation
         train_phase = self.train_phase_key
 
         deep_input_size = multi_hot_field_size+onehot_field_size
-        self.tfPrint.append(tf.Print(feat_numeric_sp.values, [feat_numeric_sp.values], message="feat_numeric_sp_valuesss:  ", summarize=10, name="tfPrint_of_"+"feat_numeric_sp"))
+        self.tfPrint.append(tf.Print(feat_numeric_sp.values, [feat_numeric_sp.values], message="feat_numeric_sp_values:  ", summarize=10, name="tfPrint_of_"+"feat_numeric_sp"))
         self.tfPrint.append(tf.Print(feat_category_sp.indices, [feat_category_sp.indices], message="feat_category_sp_idx:  ", summarize=10, name="tfPrint_of_"+"feat_category_sp_idx"))
 
         # ---------- FM component ---------
@@ -261,11 +269,12 @@ class DeepFM(BaseEstimator, TransformerMixin):
                 feat_one_hot = feat_category_sp
                 one_hot_embeddings = tf.nn.embedding_lookup(weights["feature_embeddings"], feat_one_hot.indices[:,1])
                 one_hot_embeddings = tf.reshape(one_hot_embeddings,shape=(-1,onehot_field_size,embedding_size))
-                multi_hot_embeddings_app = tf.nn.embedding_lookup_sparse(weights["feature_embeddings"], sp_ids=feat_multi_hot_idx_sp_app, sp_weights=feat_multi_hot_value_sp_app, combiner="mean")
-                multi_hot_embeddings_app = tf.reshape(multi_hot_embeddings_app,shape=[-1,1,embedding_size])
-                multi_hot_embeddings_tag = tf.nn.embedding_lookup_sparse(weights["feature_embeddings"], sp_ids=feat_multi_hot_idx_sp_tag, sp_weights=feat_multi_hot_value_sp_tag, combiner="mean")
-                multi_hot_embeddings_tag = tf.reshape(multi_hot_embeddings_tag,shape=[-1,1,embedding_size])
-                total_embeddings = tf.concat([one_hot_embeddings,multi_hot_embeddings_app,multi_hot_embeddings_tag], axis=1)
+                multi_hot_embeddings = []
+                for feat_idx_sp, feat_value_sp in zip(feat_multi_hot_idx_sp_list, feat_multi_hot_value_sp_list):
+                    emb = tf.nn.embedding_lookup_sparse(weights["feature_embeddings"], sp_ids=feat_idx_sp, sp_weights=feat_value_sp, combiner="mean")
+                    emb = tf.reshape(emb, shape=[-1, 1, embedding_size])
+                    multi_hot_embeddings.append(emb)
+                total_embeddings = tf.concat(values = [one_hot_embeddings] + multi_hot_embeddings, axis=1)
             # input
             with tf.name_scope("input"):
                 # 把连续特征不经过embedding直接输入到NN
@@ -326,7 +335,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         return average_grads
 
     # 构造 feed_dict
-    def gen_feed_dict(self, y_inp, Xi_numeric_inp, Xv_numeric_inp, Xi_category_inp, Xv_category_inp, Xi_multi_hot_app_inp, Xv_multi_hot_app_inp, Xi_multi_hot_tag_inp, Xv_multi_hot_tag_inp, train_phase):
+    def gen_feed_dict(self, batch_info_zipped, train_phase):
         feature_size = self.feature_size
         gpu_num = self.gpu_num
         dropout_deep = self.dropout_deep
@@ -337,7 +346,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         dropout_keep_fm_key = self.dropout_keep_fm_key
         dropout_keep_deep_indict_key = self.dropout_keep_deep_key
         train_phase_key = self.train_phase_key
-        models = self.models
+        models = self.models_placeholders_output
         # @timer
         def get_sparse_idx(input_df):
             result = []
@@ -369,53 +378,55 @@ class DeepFM(BaseEstimator, TransformerMixin):
             for data in allData_inp:
                 result.append(data[start:end])
             return result
-        allData = [y_inp, Xi_numeric_inp, Xv_numeric_inp, Xi_category_inp, Xv_category_inp, Xi_multi_hot_app_inp, Xv_multi_hot_app_inp, Xi_multi_hot_tag_inp, Xv_multi_hot_tag_inp]
+        y_inp = batch_info_zipped[0]
         payload_per_gpu = math.ceil(len(y_inp)/gpu_num)
         # ----- 构造 feed_dict -----
         feed_dict = {dropout_keep_fm_key: dropout_fm,
                      dropout_keep_deep_indict_key: dropout_deep,
                      train_phase_key: train_phase}
         for i in range(len(models)):
-            (f_numeric_sp, f_category_sp, multi_hot_idx_sp_app,multi_hot_value_sp_app,multi_hot_idx_sp_tag,multi_hot_value_sp_tag,
-             total_idx_sp, total_value_sp,
-             labels, _, _, _) = models[i]
+            # ------ 待输入的placeholder ------
+            (numeric_sparse_placeholder, category_sparse_placeholder,
+             multi_hot_idx_sparse_placeholder_list, multi_hot_value_sparse_placeholder_list,
+             total_idx_sparse_placeholder, total_value_sparse_placeholder,
+             labels_placeholder) = models[i][:-3]
             # 把每个batch拆解成 n个gpu的输入数据
-            y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_app, Xv_multi_hot_app, Xi_multi_hot_tag, Xv_multi_hot_tag = get_payload_gpu(i, payload_per_gpu, *allData)
+            y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_list, Xv_multi_hot_list = get_payload_gpu(i, payload_per_gpu, *batch_info_zipped)
             # ----- numeric + category + multi-hot 特征汇总 -----
             Xi_total = []
             Xv_total = []
-            for col_id in range(len(Xi_numeric)):
-                Xi_total.append(list(Xi_numeric[col_id])+list(Xi_category[col_id])+Xi_multi_hot_app[col_id]+Xi_multi_hot_tag[col_id])
-                Xv_total.append(list(Xv_numeric[col_id])+list(Xv_category[col_id])+Xv_multi_hot_app[col_id]+Xv_multi_hot_tag[col_id])
+            for row_idx in range(len(Xi_numeric)):
+                Xi_total.append(list(Xi_numeric[row_idx])+list(Xi_category[row_idx])+reduce(lambda a,b: a+b, list(Xi_multi_hot_list[row_idx])))
+                Xv_total.append(list(Xv_numeric[row_idx])+list(Xv_category[row_idx])+reduce(lambda a,b: a+b, list(Xv_multi_hot_list[row_idx])))
             # ----- 构造place_holder的输入 -----
             tensor_dense_shape = [len(y), feature_size]
             v_numeric_sparse = np.reshape(Xv_numeric,-1)
             v_category_sparse = np.reshape(Xv_category,-1)
             idx_numeric_sparse = get_sparse_idx(Xi_numeric)
             idx_category_sparse = get_sparse_idx(Xi_category)
-            multi_hot_idx_spv_app = get_sparse_tensor_from(Xi_multi_hot_app, inp_tensor_shape=tensor_dense_shape)
-            multi_hot_value_spv_app = get_sparse_tensor_from(Xv_multi_hot_app, inp_tensor_shape=tensor_dense_shape)
-            multi_hot_idx_spv_tag = get_sparse_tensor_from(Xi_multi_hot_tag, inp_tensor_shape=tensor_dense_shape)
-            multi_hot_value_spv_tag = get_sparse_tensor_from(Xv_multi_hot_tag, inp_tensor_shape=tensor_dense_shape)
-            total_idx_spv = get_sparse_tensor_from(Xi_total, inp_tensor_shape=tensor_dense_shape)
-            total_value_spv = get_sparse_tensor_from(Xv_total, inp_tensor_shape=tensor_dense_shape)
             # ----- 构造字典 -----
-            feed_dict[f_numeric_sp] = tf.SparseTensorValue(indices=idx_numeric_sparse,values=v_numeric_sparse,dense_shape=tensor_dense_shape)
-            feed_dict[f_category_sp] = tf.SparseTensorValue(indices=idx_category_sparse,values=v_category_sparse,dense_shape=tensor_dense_shape)
-            feed_dict[multi_hot_idx_sp_app] =  multi_hot_idx_spv_app
-            feed_dict[multi_hot_value_sp_app] = multi_hot_value_spv_app
-            feed_dict[multi_hot_idx_sp_tag] =  multi_hot_idx_spv_tag
-            feed_dict[multi_hot_value_sp_tag] = multi_hot_value_spv_tag
-            feed_dict[total_idx_sp] = total_idx_spv
-            feed_dict[total_value_sp] = total_value_spv
-            feed_dict[labels] = y
+            # 连续特征、离散特征的placeholder(供Deep侧使用)
+            feed_dict[numeric_sparse_placeholder] = tf.SparseTensorValue(indices=idx_numeric_sparse,values=v_numeric_sparse,dense_shape=tensor_dense_shape)
+            feed_dict[category_sparse_placeholder] = tf.SparseTensorValue(indices=idx_category_sparse,values=v_category_sparse,dense_shape=tensor_dense_shape)
+            # 多个multi-hot特征,依次取到idx和value,然后获得tensor(供Deep侧使用)
+            for i in range(self.multi_hot_field_size):
+                # 第i个multi-hot特征的索引
+                Xi_multi_hot = [idx_list[i] for idx_list in Xi_multi_hot_list]
+                feed_dict[multi_hot_idx_sparse_placeholder_list[i]] = get_sparse_tensor_from(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
+                # 第i个multi-hot特征的取值
+                Xv_multi_hot = [value_list[i] for value_list in Xv_multi_hot_list]
+                feed_dict[multi_hot_value_sparse_placeholder_list[i]] = get_sparse_tensor_from(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
+            # 整体特征(供FM侧使用)
+            feed_dict[total_idx_sparse_placeholder] = get_sparse_tensor_from(Xi_total, inp_tensor_shape=tensor_dense_shape)
+            feed_dict[total_value_sparse_placeholder] = get_sparse_tensor_from(Xv_total, inp_tensor_shape=tensor_dense_shape)
+            feed_dict[labels_placeholder] = y
         return feed_dict
 
     def fit_on_batch(self, batch_info, batch_cnt):
         # ----- batch 数据拆分 -----
-        y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_app, Xv_multi_hot_app, Xi_multi_hot_tag, Xv_multi_hot_tag = (np.array(x) for x in zip(*batch_info))
+        # y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = [np.array(x) for x in zip(*batch_info)]
         # ----- 构造feed_dict -----
-        feed_dict = self.gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_app, Xv_multi_hot_app, Xi_multi_hot_tag, Xv_multi_hot_tag, train_phase=True)
+        feed_dict = self.gen_feed_dict(batch_info_zipped=[np.array(x) for x in zip(*batch_info)], train_phase=True)
         debug_log("feed_dict keys %s" % feed_dict.keys())
         for k in feed_dict: debug_log("""
         feed_dict:
@@ -460,7 +471,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
                         loss_on_train = []
                         train_mertic,_ = self.evaluate_with_iter(iter(batch_info))
                         now = ori_time.strftime("|%Y-%m-%d %H:%M:%S| ", ori_time.localtime(ori_time.time()))
-                        print(now+": "+"[epoch:%02d] [batch:%05d | global_batch:%05d] train-result: avg_loss=%.4f, last_loss=%.4f, cur_batch_auc=%.4f [%.1f s]" % (epoch + 1, batch_cnt, global_batch_cnt, avg_loss, loss, train_mertic, time() - t1))
+                        print(now+": "+"[epoch:%02d] [batch:%05d | global_batch:%05d] train-result: cur_batch_auc=%.4f, avg_loss=%.4f, last_loss=%.4f [%.1f s]" % (epoch + 1, batch_cnt, global_batch_cnt, train_mertic, avg_loss, loss,  time() - t1))
                         t1 = time()
                     if batch_cnt != 0 and batch_cnt % 2500 == 0:
                         # total is 51949610, batch_size = 9126, batch_cnt = 5637
@@ -495,15 +506,14 @@ class DeepFM(BaseEstimator, TransformerMixin):
             batch_info = list(itertools.islice(iterator, 0, self.batch_size))
             num_batch = len(batch_info)
             if num_batch>0:
-                dummy_y = [[0]]*num_batch
-                y_batch, Xi_numeric_batch, Xv_numeric_batch, Xi_category_batch, Xv_category_batch, Xi_multi_hot_app_batch, Xv_multi_hot_app_batch, Xi_multi_hot_tag_batch, Xv_multi_hot_tag_batch = zip(*batch_info)
-                feed_dict = self.gen_feed_dict(y_inp=dummy_y, Xi_numeric_inp=Xi_numeric_batch, Xv_numeric_inp=Xv_numeric_batch,
-                                               Xi_category_inp=Xi_category_batch, Xv_category_inp=Xv_category_batch,
-                                               Xi_multi_hot_app_inp=Xi_multi_hot_app_batch, Xv_multi_hot_app_inp=Xv_multi_hot_app_batch,
-                                               Xi_multi_hot_tag_inp=Xi_multi_hot_tag_batch, Xv_multi_hot_tag_inp=Xv_multi_hot_tag_batch,
-                                               train_phase=False)
-                batch_out = self.sess.run(self.out, feed_dict=feed_dict).tolist()
-                y_pred.extend(batch_out)
+                # y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_list, Xv_multi_hot_list = zip(*batch_info)
+                batch_info_zipped = [np.array(x) for x in zip(*batch_info)]
+                feed_dict = self.gen_feed_dict(batch_info_zipped=batch_info_zipped, train_phase=False)
+
+                y_pred_batch = self.sess.run(self.out, feed_dict=feed_dict).tolist()
+                y_batch = batch_info_zipped[0]
+
+                y_pred.extend(y_pred_batch)
                 y.extend(y_batch)
             else:
                 print("\n")

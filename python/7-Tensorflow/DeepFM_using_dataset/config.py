@@ -6,12 +6,13 @@ import json
 #***** 存跃的数据（midas） *****
 class config_midas(object):
     # input
-    _basePath = "/home/zhoutong/data/apus_ad/starksdk/tfrecord_2018-09-10_to_2018-09-24_and_2018-09-25_to_2018-10-01_intersectLR"
+    _basePath = "/home/zhoutong/data/apus_ad/midas/tfrecord_2018-11-01_to_2018-11-23_and_2018-11-24_to_2018-11-30_filterRepeatView_intersectLR"
     train_tfrecord_file = _basePath+"/train.tfrecord.gz"
     valid_tfrecord_file = _basePath+"/valid.tfrecord.gz"
     info_file = _basePath+"/info.json"
     # output
-    base_save_dir = "/home/zhoutong/tf_modelInfo/type={type}".format(type="midas")
+    tagTime= time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time()))
+    base_save_dir = "/home/zhoutong/tf_modelInfo/type={type}/dt={dt}".format(type="midas",dt=tagTime)
     # load-json
     with open(info_file,"r+") as f:
         info = "".join(f.readlines())

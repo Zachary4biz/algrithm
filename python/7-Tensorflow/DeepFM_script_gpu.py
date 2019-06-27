@@ -8,7 +8,7 @@ import sys
 import itertools
 from progressbar import ProgressBar
 import numpy as np
-from functools import wraps
+from functools import wraps,reduce
 import os
 
 ########
@@ -27,6 +27,7 @@ import os
 # field_size: 30
 ###
 
+
 def timer(inp_func):
     @wraps(inp_func)
     def warpper(*args, **kw):
@@ -38,6 +39,7 @@ def timer(inp_func):
     return warpper
 
 class DataGenerator(object):
+    d = 30
     def __init__(self, train_path, valid_path, max_numeric):
         self.train_path = train_path
         self.valid_path = valid_path
@@ -49,10 +51,6 @@ class DataGenerator(object):
         new_params = now + ": " + param
         print(new_params)
         sys.stdout.flush()
-    def get_train_generator(self):
-        return self._get_generator(self.train_path)
-    def get_valid(self):
-        return self._get_valid(self.valid_path)
     def get_apus_ad_train_generator(self):
         return self._yield_apus_ad_generator(self.train_path,self.max_numeric)
     def get_apus_ad_valid(self):
@@ -65,8 +63,8 @@ class DataGenerator(object):
                 label = int(info[0])
                 numeric_f = info[1].split(" ")
                 category_f = info[2].split(" ")
-                multi_hot_f_app = info[3].split(" ")
-                multi_hot_f_tag = info[4].split(" ")
+                multi_hot_f = [x.split(" ")for x in info[3:]]
+
                 y = [label]
                 def get_idx_and_value(feature_info):
                     index = [int(x.split(":")[0]) for x in feature_info]
@@ -74,8 +72,9 @@ class DataGenerator(object):
                     return index,value
                 Xi_numeric, Xv_numeric = get_idx_and_value(numeric_f)
                 Xi_category, Xv_category = get_idx_and_value(category_f)
-                Xi_multi_hot_app, Xv_multi_hot_app = get_idx_and_value(multi_hot_f_app)
-                Xi_multi_hot_tag, Xv_multi_hot_tag = get_idx_and_value(multi_hot_f_tag)
+                multi_hot_f_tmp = [get_idx_and_value(feature) for feature in multi_hot_f]
+                Xi_multi_hot_list = [feature_idx for feature_idx,value in multi_hot_f_tmp]
+                Xv_multi_hot_list = [value for feature_idx,value in multi_hot_f_tmp]
                 # Xv_numeric 归一化
                 if len(max_numeric)>0:
                     # 根据索引是0还是1还是2从 max_nuemeric里面取值
@@ -85,73 +84,7 @@ class DataGenerator(object):
                         v = float(i.split(":")[1])
                         Xv_numeric.append(v/max_numeric[idx])
                     Xv_numeric = list(map(lambda x: x if x<=1 else 1, Xv_numeric))
-                yield [y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_app, Xv_multi_hot_app,Xi_multi_hot_tag,Xv_multi_hot_tag]
-    @staticmethod
-    def _get_apus_ad_valid(reader_path):
-        def get_idx_and_value(feature_info):
-                idx = [int(x.split(":")[0]) for x in feature_info]
-                value = [float(x.split(":")[1]) for x in feature_info]
-                return idx,value
-        # out_y_valid_, out_Xi_numeric_valid, out_Xv_numeric_valid, out_Xi_category_valid, out_Xv_category_valid, out_Xi_multi_hot_valid, out_Xv_multi_hot_valid= ([] for _ in range(7))
-        valid_info = []
-        with open(reader_path, "r", encoding="utf-8") as f:
-            data = f.readlines()[:1024*100]
-        DataGenerator.print_t("   _get_apus_ad_valid looping..")
-        DataGenerator.print_t("   ******** NOTE: ONLY LOAD 1024*100 VALID-SAMPLES OF apus_ad CURRENTLY ********")
-        with ProgressBar(max_value=len(data)) as progress:
-            i = 0
-            for line in data:
-                info = line.strip("[]\n").split("\t")
-                label = int(info[0])
-                numeric_f = info[1].split(" ")
-                category_f = info[2].split(" ")
-                multi_hot_f = info[3].split(" ")
-                y = [label]
-                Xi_numeric, Xv_numeric = get_idx_and_value(numeric_f)
-                Xi_category, Xv_category = get_idx_and_value(category_f)
-                Xi_multi_hot, Xv_multi_hot = get_idx_and_value(multi_hot_f)
-                valid_info.append([y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot])
-                # out_y_valid_.append(y)
-                # out_Xi_numeric_valid.append(Xi_numeric)
-                # out_Xv_numeric_valid.append(Xv_numeric)
-                # out_Xi_category_valid.append(Xi_category)
-                # out_Xv_category_valid.append(Xv_category)
-                # out_Xi_multi_hot_valid.append(Xi_multi_hot)
-                # out_Xv_multi_hot_valid.append(Xv_multi_hot)
-                i+=1
-                progress.update(i)
-        return valid_info
-    @staticmethod
-    def _get_generator(reader_path):
-        with open(reader_path, "r", encoding="utf-8") as f:
-            for line in f:
-                info = line.strip().split("\t")
-                dense_f = info[0]
-                sparse_f = info[1]
-                label = int(info[2])
-                Xi = list(range(13)) + list(map(lambda x: 13 + int(x), sparse_f.split(",")))
-                Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
-                y = [label]
-                yield [Xi, Xv, y]
-    @staticmethod
-    def _get_valid(path):
-        Xi_v, Xv_v, y_v = ([] for _ in range(3))
-        with open(path, "r", encoding="utf-8") as f:
-            data = f.readlines()[:1024*100]
-        DataGenerator.print_t("   ******** NOTE: ONLY LOAD 1024*100 VALID-SAMPLES OF criteo_data CURRENTLY ********")
-        for line in data:
-            info = line.strip().split("\t")
-            dense_f = info[0]
-            Xv = list(map(lambda x: float(x), dense_f.split(","))) + [1 for _ in range(13, 13 + 26)]
-            Xv_v.append(Xv)
-            sparse_f = info[1]
-            Xi = list(range(13)) + list(map(lambda x: 13 + float(x), sparse_f.split(",")))
-            Xi_v.append(Xi)
-            lalbel = int(info[2])
-            y_v.append([lalbel])
-        return Xi_v, Xv_v, y_v
-
-
+                yield [y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_list, Xv_multi_hot_list]
 
 # 顺序按连续特征索引的顺序来,依次表示 0 1 2 三个连续特征的最大值
 # global_max_numeric = [999, 10001, 13]
@@ -166,6 +99,11 @@ class DataGenerator(object):
 base_p = "/home/zhoutong/data/apus_ad/data_2018-09-21_to_2018-09-26"
 with open(base_p + "/info.json", "r+") as f:
     info = eval(f.readlines()[0].strip())
+print("*"*40)
+for k,v in info.items():
+    print("Key: ",k)
+    print("Value: ", v, "\n")
+print("*"*40)
 global_max_numeric = [x[1] for x in sorted(map(lambda x: (int(x[0]), int(x[1])), info['numeric_max_v'].items()), key=lambda x: x[0])]
 global_feature_size = info['feature_size'] + 1
 global_numeric_field_size = info['numeric_f_size']
@@ -199,23 +137,10 @@ def pre_data(inp_path_train, inp_path_valid):
         f_train_pos = open(new_save_path + "_shuffled_pos", "w")
         f_train_neg = open(new_save_path + "_shuffled_neg", "w")
         neg_cnt,pos_cnt = 0,0
-        abnormal_to_drop = 0
         batch_size = 1024*4
-        def filter_sample(sample_inp):
-            # 按zip后的第0项(即特征idx)排序
-            # 取第1个特征的(idx,value)元组 (numeric特征idx都是从0开始的连续数字,所以idx为1的特征刚好也排在数组的下标1处)
-            # 再取第1个是从元组中取出值
-            numeric_feat = list(map(lambda x:x.split(":"), sample_inp.strip("[]\n").split("\t")[1].split(" ")))
-            should_drop = float(sorted(numeric_feat, key=lambda x:x[0])[1][1])==0
-            # 注意filter的规则True保留 False去除
-            should_keep = not should_drop
-            return should_keep
         while True:
             sample_list_raw = list(itertools.islice(data_g, 0, batch_size))
-            # 去除掉广告底价为0的,这是异常数据大约15w/1400w条
-            # sample_list = list(filter(filter_sample, sample_list_raw))
             sample_list = sample_list_raw
-            # abnormal_to_drop += len(sample_list_raw) - len(sample_list)
             if len(sample_list) > 0:
                 pos=[i for i in filter(lambda x: x.strip("[]\n").split("\t")[0] == '1', sample_list)]
                 pos_cnt += len(pos)
@@ -227,7 +152,6 @@ def pre_data(inp_path_train, inp_path_valid):
                 break
         f_train_pos.close()
         f_train_neg.close()
-        # print("abnormal_to_drop 广告底价为0的作为异常数据丢弃,共计 %s条" % abnormal_to_drop)
         return new_save_path,pos_cnt,neg_cnt
     # 正负样本按比例各取多少写入同一个文件中
     def merge_shuffled_neg_pos_to_one(save_path, reader_path, r_pos, r_neg):
@@ -344,10 +268,13 @@ if __name__ == '__main__':
     file_exists = os.path.exists(global_path_valid + "_shuffled") and os.path.exists(global_path_train + "_shuffled")
     if not file_exists : pre_data(global_path_train, global_path_valid)
     # 禁用GPU
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     # 训练模型
     apus_ad_multi_hot(global_path_train + "_shuffled", global_path_valid + "_shuffled")
+
+
+
 
 class InferenceWithFile(object):
     def __init__(self,ckpt_path):
@@ -368,7 +295,7 @@ class InferenceWithFile(object):
         model_saver.restore(model_sess, inp_ckpt_path)
         return model_sess,model_graph
     @staticmethod
-    def gen_feed_dict(inp_y, inp_Xi_numeric, inp_Xv_numeric, inp_Xi_category, inp_Xv_category, inp_Xi_multi_hot_app, inp_Xv_multi_hot_app, inp_Xi_multi_hot_tag, inp_Xv_multi_hot_tag):
+    def gen_feed_dict(batch_info_zipped):
         def get_sparse_idx(input_df):
             result = []
             for i in range(len(input_df)):
@@ -384,24 +311,24 @@ class InferenceWithFile(object):
                 tensor_indices_.extend([[i,v] for v in range(len(inp))])
             sp_tensor = tf.SparseTensorValue(indices=tensor_indices_, values=tensor_values_, dense_shape=inp_tensor_shape)
             return sp_tensor
-        tensor_dense_shape = [len(inp_y), 161720 + 1]
+        y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot_list, Xv_multi_hot_list = batch_info_zipped
+        tensor_dense_shape = [len(y), 161720 + 1]
+
+        # 连续特征
+        v_numeric_sparse = np.reshape(Xv_numeric, -1)
+        v_category_sparse = np.reshape(Xv_category, -1)
+        # 离散特征
+        idx_numeric_sparse = get_sparse_idx(Xi_numeric)
+        idx_category_sparse = get_sparse_idx(Xi_category)
+        # 整体特征汇总
         Xi_total = []
         Xv_total = []
-        for col_id in range(len(inp_Xi_numeric)):
-            Xi_total.append(list(inp_Xi_numeric[col_id]) + list(inp_Xi_category[col_id]) + inp_Xi_multi_hot_app[col_id] + inp_Xi_multi_hot_tag[col_id])
-            Xv_total.append(list(inp_Xv_numeric[col_id]) + list(inp_Xv_category[col_id]) + inp_Xv_multi_hot_app[col_id] + inp_Xv_multi_hot_tag[col_id])
-        Xi_total = np.array(Xi_total)
-        Xv_total = np.array(Xv_total)
-        v_numeric_sparse = np.reshape(inp_Xv_numeric, -1)
-        v_category_sparse = np.reshape(inp_Xv_category, -1)
-        idx_numeric_sparse = get_sparse_idx(inp_Xi_numeric)
-        idx_category_sparse = get_sparse_idx(inp_Xi_category)
-        multi_hot_idx_sp= get_sparse_tensor_from(inp_Xi_multi_hot_app, tensor_dense_shape)
-        multi_hot_value_sp = get_sparse_tensor_from(inp_Xv_multi_hot_app, tensor_dense_shape)
-        multi_hot_idx_sp_tag= get_sparse_tensor_from(inp_Xi_multi_hot_tag, tensor_dense_shape)
-        multi_hot_value_sp_tag = get_sparse_tensor_from(inp_Xv_multi_hot_tag, tensor_dense_shape)
+        for row_idx in range(len(Xi_numeric)):
+            Xi_total.append(list(Xi_numeric[row_idx])+list(Xi_category[row_idx])+reduce(lambda a,b: a+b, list(Xi_multi_hot_list[row_idx])))
+            Xv_total.append(list(Xv_numeric[row_idx])+list(Xv_category[row_idx])+reduce(lambda a,b: a+b, list(Xv_multi_hot_list[row_idx])))
         total_idx_sp = get_sparse_tensor_from(Xi_total,tensor_dense_shape)
         total_value_sp = get_sparse_tensor_from(Xv_total,tensor_dense_shape)
+        # 构造字典
         feed_dict = {"dropout_keep_deep:0": [1.0, 1.0, 1.0, 1.0],
                      "dropout_keep_fm:0": [1.0, 1.0],
                      "tower_0/gpu_variables/feat_total_idx_sp/values:0": total_idx_sp.values,
@@ -414,20 +341,27 @@ class InferenceWithFile(object):
                      "tower_0/gpu_variables/feat_category_sp/indices:0": idx_category_sparse,
                      "tower_0/gpu_variables/feat_category_sp/values:0": v_category_sparse,
                      "tower_0/gpu_variables/feat_category_sp/shape:0": tensor_dense_shape,
-                     "tower_0/gpu_variables/feat_multi_hot_idx_sp_app/values:0": multi_hot_idx_sp.values,
-                     "tower_0/gpu_variables/feat_multi_hot_idx_sp_app/indices:0": multi_hot_idx_sp.indices,
-                     "tower_0/gpu_variables/feat_multi_hot_value_sp_app/values:0": multi_hot_value_sp.values,
-                     "tower_0/gpu_variables/feat_multi_hot_value_sp_app/indices:0": multi_hot_value_sp.indices,
-                     "tower_0/gpu_variables/feat_multi_hot_idx_sp_tag/values:0": multi_hot_idx_sp_tag.values,
-                     "tower_0/gpu_variables/feat_multi_hot_idx_sp_tag/indices:0": multi_hot_idx_sp_tag.indices,
-                     "tower_0/gpu_variables/feat_multi_hot_value_sp_tag/values:0": multi_hot_value_sp_tag.values,
-                     "tower_0/gpu_variables/feat_multi_hot_value_sp_tag/indices:0": multi_hot_value_sp_tag.indices,
                      "train_phase:0": False}
+        # 多个multi-hot特征,依次取到idx和value,然后获得tensor(供Deep侧使用)
+        for i in range(global_multi_hot_field_size):
+            # 第i个multi-hot特征的索引
+            Xi_multi_hot = [idx_list[i] for idx_list in Xi_multi_hot_list]
+            Xi_multi_hot_tensor = get_sparse_tensor_from(Xi_multi_hot, inp_tensor_shape=tensor_dense_shape)
+            # 第i个multi-hot特征的取值
+            Xv_multi_hot = [value_list[i] for value_list in Xv_multi_hot_list]
+            Xv_multi_hot_tensor = get_sparse_tensor_from(Xv_multi_hot, inp_tensor_shape=tensor_dense_shape)
+
+            feed_dict["tower_0/gpu_variables/feat_multi_hot_idx_sp_%s/indices:0" % i] =Xi_multi_hot_tensor.indices
+            feed_dict["tower_0/gpu_variables/feat_multi_hot_idx_sp_%s/values:0" % i] = Xi_multi_hot_tensor.values
+            feed_dict["tower_0/gpu_variables/feat_multi_hot_value_sp_%s/indices:0" % i] =Xv_multi_hot_tensor.indices
+            feed_dict["tower_0/gpu_variables/feat_multi_hot_value_sp_%s/values:0" % i] = Xv_multi_hot_tensor.values
+            # feed_dict["tower_0/gpu_variables/feat_multi_hot_valuev_sp_app/indices:0"] = Xv_multi_hot_tensor.indices
+            # feed_dict["tower_0/gpu_variables/feat_multi_hot_value_sp_app/values:0"] = Xv_multi_hot_tensor.values
+
         return feed_dict
 
-    def inference(self, path_valid_, path_train=""):
+    def inference(self, data_generator, path_train=""):
         sess,graph = self.resotre(self.ckpt_path)
-        data_generator = DataGenerator(train_path=path_train, valid_path=path_valid_, max_numeric=global_max_numeric)
         valid_generator = data_generator.get_apus_ad_valid()
         y_ = np.array([])
         out_ = np.array([])
@@ -438,9 +372,9 @@ class InferenceWithFile(object):
             t_b = time.time()
             data_as_list = list(itertools.islice(valid_generator, 0, batch_size))
             if len(data_as_list) > 0:
-                y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot,Xi_multi_hot_tag,Xv_multi_hot_tag = (np.array(x) for x in
-                                                                                                   zip(*data_as_list))
-                feed_dict_ = self.gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot,Xi_multi_hot_tag,Xv_multi_hot_tag)
+                y = list(zip(*data_as_list))[0]
+                feed_dict_ = self.gen_feed_dict([np.array(x) for x in zip(*data_as_list)])
+                print(feed_dict_)
                 out_batch = sess.run(graph.get_tensor_by_name("all_pred_reshape_out:0"), feed_dict=feed_dict_)
                 out_=np.concatenate((out_,np.reshape(out_batch,newshape=(-1))))
                 y_ = np.concatenate((y_,np.reshape(y,newshape=(-1))))
@@ -460,8 +394,34 @@ class InferenceWithFile(object):
 
     # 需要做纠偏; 输入需要支持原始数据
     def inference_2(self, path_valid):
+        sess,graph = self.resotre(self.ckpt_path)
+        # 文件路径
+        tfrecord_file=""
+        # 解析TFRecord
+        def _parse_function(example_proto):
+            pass
+        # Importing Data (DataSetAPI读取TFRecord)
+        dataset = tf.data.TFRecordDataset(tfrecord_file).map(_parse_function)
+        # Create an Iterator
+        iterator = dataset.make_one_shot_iterator()
+        # Consuming Data
+        next_element = iterator.get_next()
+        # log
+        print(sess.run(next_element))
 
+        train_data=[]
+
+        dataset = tf.data.Dataset.from_tensor_slices(train_data).repeat().batch(5)
+
+
+
+
+
+
+        print(dataset)
         pass
+
+
 
 def useInference():
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -470,13 +430,14 @@ def useInference():
     valid_file = "data_2018-09-03_to_2018-09-09_valid"
     # valid_file = "valid_data_0801_0806_shuffled_small_small"
     path_valid = "/home/zhoutong/data/apus_ad/"+valid_file
+    data_g = DataGenerator(train_path="", valid_path=path_valid, max_numeric=global_max_numeric)
     model_ckpt_path= "/home/zhoutong/py_script/model_dir/DeepFM_fieldMerge_model.ckpt-1332"
     # model_ckpt_path = "/home/zhoutong/py_script/apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt-8228"
     # model_ckpt_path = "/home/zhoutong/py_script/apud_ad_model__sample_auc_7192_normalized/DeepFM_fieldMerge_model.ckpt-8228"
     # model_ckpt_path = "/home/zhoutong/DeepFM/apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt-5000"
     # print_tensors_in_checkpoint_file(model_ckpt_path, tensor_name=None, all_tensors=False)
     inferer = InferenceWithFile(model_ckpt_path)
-    auc, loss, out, y_inferenced = inferer.inference(path_valid)
+    auc, loss, out, y_inferenced = inferer.inference(data_generator=data_g)
     print("load model from file \n auc: %.5f, loss: %.5f" % (auc,loss))
 
 

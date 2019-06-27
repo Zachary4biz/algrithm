@@ -7,6 +7,7 @@ import sys
 import time
 import itertools
 from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss
 from progressbar import ProgressBar
 sys.path.append("../")
 
@@ -121,18 +122,19 @@ class DataGenerator(object):
 # 如果用 graph.get_tensor_by_name() 必须传 "feature_embeddings:0",如果没有":0"会认为是在指代一个 operation
 # 使用 graph.get_operation_by_name() 获取一个operation
 ######
-ckpt_path = "/home/zhoutong/DeepFM/apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt-5000"
+# ckpt_path = "/home/zhoutong/DeepFM/apud_ad_model_dir/DeepFM_fieldMerge_model.ckpt-5000"
+ckpt_path = "/home/zhoutong/py_script/model_dir/DeepFM_fieldMerge_model.ckpt-7500"
 meta_path = ckpt_path+".meta"
 # 打印全部的tensor
-# print_tensors_in_checkpoint_file(ckpt_path, tensor_name=None, all_tensors=False)
+print_tensors_in_checkpoint_file(ckpt_path, tensor_name=None, all_tensors=False)
 # 根据名字打印tensor
-# print_tensors_in_checkpoint_file(ckpt_path, tensor_name='feature_embeddings', all_tensors=False)
-
+print_tensors_in_checkpoint_file(ckpt_path, tensor_name='feature_embeddings', all_tensors=False)
 
 # 恢复网络图; 可以手工用python一个个创建,也可以如下用import_meta_graph导入保存过的网络
 graph = tf.Graph()
 with graph.as_default():
     saver = tf.train.import_meta_graph(meta_path)
+
 # 创建session
 config=tf.ConfigProto(allow_soft_placement=True,log_device_placement=False)
 config.gpu_options.allow_growth = True
@@ -143,6 +145,9 @@ saver.restore(sess, ckpt_path)
 # embedding = graph.get_tensor_by_name("feature_embeddings:0")
 # out_reshape = graph.get_operation_by_name("all_pred_reshape_out")
 
+# 最全的tensor 包括operation
+print([n.name for n in graph.as_graph_def().node])
+
 
 def get_sparse_idx(input_df):
     result = []
@@ -150,7 +155,6 @@ def get_sparse_idx(input_df):
         for j in input_df[i]:
             result.append([i, j])
     return np.array(result)
-
 
 def get_sparse_tensor_from(input_df,inp_tensor_shape):
     tensor_values_ = []
@@ -163,53 +167,89 @@ def get_sparse_tensor_from(input_df,inp_tensor_shape):
     # return tensor_indices_,tensor_values_
     return sp_tensor
 
-tensor_dense_shape = [1024,101200]
+def gen_feed_dict(inp_y, inp_Xi_numeric, inp_Xv_numeric, inp_Xi_category, inp_Xv_category, inp_Xi_multi_hot, inp_Xv_multi_hot):
+    tensor_dense_shape = [len(inp_y), 161720 + 1]
+    Xi_total = []
+    Xv_total = []
+    for col_id in range(len(inp_Xi_numeric)):
+        Xi_total.append(list(inp_Xi_numeric[col_id]) + list(inp_Xi_category[col_id]) + inp_Xi_multi_hot[col_id])
+        Xv_total.append(list(inp_Xv_numeric[col_id]) + list(inp_Xv_category[col_id]) + inp_Xv_multi_hot[col_id])
+    Xi_total = np.array(Xi_total)
+    Xv_total = np.array(Xv_total)
+    v_numeric_sparse = np.reshape(inp_Xv_numeric, -1)
+    v_category_sparse = np.reshape(inp_Xv_category, -1)
+    idx_numeric_sparse = get_sparse_idx(inp_Xi_numeric)
+    idx_category_sparse = get_sparse_idx(inp_Xi_category)
+    multi_hot_idx_sp= get_sparse_tensor_from(inp_Xi_multi_hot, tensor_dense_shape)
+    multi_hot_value_sp = get_sparse_tensor_from(inp_Xv_multi_hot, tensor_dense_shape)
+    total_idx_sp = get_sparse_tensor_from(Xi_total,tensor_dense_shape)
+    total_value_sp = get_sparse_tensor_from(Xv_total,tensor_dense_shape)
+    feed_dict = {"dropout_keep_deep:0": [1.0, 1.0, 1.0, 1.0],
+                 "dropout_keep_fm:0": [1.0, 1.0],
+                 "tower_0/gpu_variables/feat_total_idx_sp/values:0": total_idx_sp.values,
+                 "tower_0/gpu_variables/feat_total_idx_sp/indices:0": total_idx_sp.indices,
+                 "tower_0/gpu_variables/feat_total_value_sp/values:0": total_value_sp.values,
+                 "tower_0/gpu_variables/feat_total_value_sp/indices:0": total_value_sp.indices,
+                 "tower_0/gpu_variables/feat_numeric_sp/indices:0": idx_numeric_sparse,
+                 "tower_0/gpu_variables/feat_numeric_sp/values:0": v_numeric_sparse,
+                 "tower_0/gpu_variables/feat_numeric_sp/shape:0": tensor_dense_shape,
+                 "tower_0/gpu_variables/feat_category_sp/indices:0": idx_category_sparse,
+                 "tower_0/gpu_variables/feat_category_sp/values:0": v_category_sparse,
+                 "tower_0/gpu_variables/feat_category_sp/shape:0": tensor_dense_shape,
+                 "tower_0/gpu_variables/feat_multi_hot_idx_sp/values:0": multi_hot_idx_sp.values,
+                 "tower_0/gpu_variables/feat_multi_hot_idx_sp/indices:0": multi_hot_idx_sp.indices,
+                 "tower_0/gpu_variables/feat_multi_hot_value_sp/values:0": multi_hot_value_sp.values,
+                 "tower_0/gpu_variables/feat_multi_hot_value_sp/indices:0": multi_hot_value_sp.indices,
+                 "train_phase:0": False}
+    return feed_dict
+
 path_train = "/home/zhoutong/data/apus_ad/apus_ad_feature_train"
 path_valid = "/home/zhoutong/data/apus_ad/apus_ad_feature_valid"
+# path_train = "/home/zhoutong/data/apus_ad/train_data_0717_0730_shuffled"
+# path_valid = "/home/zhoutong/data/apus_ad/valid_data_0801_0806_shuffled"
 data_generator = DataGenerator(train_path=path_train, valid_path=path_valid)
 valid_generator =  data_generator.get_apus_ad_valid()
-valid_info = list(itertools.islice(valid_generator,0,1024*8))
-y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = (np.array(x) for x in zip(*valid_info))
-Xi_total = []
-Xv_total = []
-for col_id in range(len(Xi_numeric)):
-    Xi_total.append(list(Xi_numeric[col_id])+list(Xi_category[col_id])+Xi_multi_hot[col_id])
-    Xv_total.append(list(Xv_numeric[col_id])+list(Xv_category[col_id])+Xv_multi_hot[col_id])
+train_generator = data_generator.get_apus_ad_train_generator()
+data_as_list = list(itertools.islice(valid_generator, 0, 1024 * 10))
+y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = (np.array(x) for x in zip(*data_as_list))
 
-Xi_total = np.array(Xi_total)
-Xv_total = np.array(Xv_total)
-v_numeric_sparse = np.reshape(Xv_numeric,-1)
-v_category_sparse = np.reshape(Xv_category,-1)
-idx_numeric_sparse = get_sparse_idx(Xi_numeric)
-idx_category_sparse = get_sparse_idx(Xi_category)
-multi_hot_idx_sp= get_sparse_tensor_from(Xi_multi_hot,tensor_dense_shape)
-multi_hot_value_sp = get_sparse_tensor_from(Xv_multi_hot,tensor_dense_shape)
-total_idx_sp = get_sparse_tensor_from(Xi_total,tensor_dense_shape)
-total_value_sp = get_sparse_tensor_from(Xv_total,tensor_dense_shape)
-
-feed_dict = {"dropout_keep_deep:0": [1.0, 1.0, 1.0, 1.0],
-             "dropout_keep_fm:0": [1.0, 1.0],
-             "tower_0/gpu_variables/feat_total_idx_sp/values:0": total_idx_sp.values,
-             "tower_0/gpu_variables/feat_total_idx_sp/indices:0": total_idx_sp.indices,
-             "tower_0/gpu_variables/feat_total_value_sp/values:0": total_value_sp.values,
-             "tower_0/gpu_variables/feat_total_value_sp/indices:0": total_value_sp.indices,
-             "tower_0/gpu_variables/feat_numeric_sp/indices:0": idx_numeric_sparse,
-             "tower_0/gpu_variables/feat_numeric_sp/values:0": v_numeric_sparse,
-             "tower_0/gpu_variables/feat_numeric_sp/shape:0": tensor_dense_shape,
-             "tower_0/gpu_variables/feat_category_sp/indices:0": idx_category_sparse,
-             "tower_0/gpu_variables/feat_category_sp/values:0": v_category_sparse,
-             "tower_0/gpu_variables/feat_category_sp/shape:0": tensor_dense_shape,
-             "tower_0/gpu_variables/feat_multi_hot_idx_sp/values:0": multi_hot_idx_sp.values,
-             "tower_0/gpu_variables/feat_multi_hot_idx_sp/indices:0": multi_hot_idx_sp.indices,
-             "tower_0/gpu_variables/feat_multi_hot_value_sp/values:0": multi_hot_value_sp.values,
-             "tower_0/gpu_variables/feat_multi_hot_value_sp/indices:0": multi_hot_value_sp.indices,
-             "train_phase:0": False}
+feed_dict = gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot)
 out = sess.run(graph.get_tensor_by_name("all_pred_reshape_out:0"), feed_dict=feed_dict)
 roc_auc_score(y,out)
-# feed_dict[f_numeric_sp] = tf.SparseTensorValue(indices=idx_numeric_sparse,values=v_numeric_sparse,dense_shape=tensor_dense_shape)
-#             feed_dict[f_category_sp] =
-#             feed_dict[multi_hot_idx_sp] =  multi_hot_idx_spv
-#             feed_dict[multi_hot_value_sp] = multi_hot_value_spv
-#             feed_dict[total_idx_sp] = total_idx_spv
-#             feed_dict[total_value_sp] = total_value_spv
-#             feed_dict[labels] = y
+log_loss(y,out)
+log_loss(list(map(lambda x : x[0],y)), list(map(lambda x : x[0],out)))
+
+def load_Model(inp_ckpt_path):
+    inp_meta_path = inp_ckpt_path + ".meta"
+    model_graph = tf.Graph()
+    with model_graph.as_default():
+        model_saver = tf.train.import_meta_graph(inp_meta_path)
+
+    # 创建session
+    model_config=tf.ConfigProto(allow_soft_placement=True,log_device_placement=False)
+    model_config.gpu_options.allow_growth = True
+    model_sess = tf.Session(config=model_config, graph=model_graph)
+    # 向sessino中载入参数; 注意网络保存时,占位符(tf.placeholder)是不会被保存的
+    model_saver.restore(model_sess, inp_ckpt_path)
+    return model_sess
+
+def loadData(path_train,path_valid):
+    path_train = "/home/zhoutong/data/apus_ad/apus_ad_feature_train"
+    path_valid = "/home/zhoutong/data/apus_ad/apus_ad_feature_valid"
+    # path_train = "/home/zhoutong/data/apus_ad/train_data_0717_0730_shuffled"
+    # path_valid = "/home/zhoutong/data/apus_ad/valid_data_0801_0806_shuffled"
+    data_generator = DataGenerator(train_path=path_train, valid_path=path_valid)
+    valid_generator =  data_generator.get_apus_ad_valid()
+    train_generator = data_generator.get_apus_ad_train_generator()
+    data_as_list = list(itertools.islice(valid_generator, 0, 1024 * 10))
+    y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot = (np.array(x) for x in zip(*data_as_list))
+
+    feed_dict = gen_feed_dict(y, Xi_numeric, Xv_numeric, Xi_category, Xv_category, Xi_multi_hot, Xv_multi_hot)
+    return feed_dict
+ckpt_path = "/home/zhoutong/py_script/model_dir/DeepFM_fieldMerge_model.ckpt-7500"
+print_tensors_in_checkpoint_file(ckpt_path, tensor_name=None, all_tensors=False)
+sess = load_Model(ckpt_path)
+
+
+
+

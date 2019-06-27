@@ -6,6 +6,7 @@ import itertools
 import re
 from collections import deque,defaultdict
 import json
+import sys
 
 class Node(object):
     """
@@ -92,7 +93,12 @@ class DFATree(object):
     # 清理句子中的各种符号
     @staticmethod
     def text_format(text_inp:str):
-        return " " + re.sub("[^\\w]+"," ",text_inp) + " "
+        emoji_regex = """|(\ud83d[\ude00-\ude4f])"""
+        symbol_regex = """([~!@#$%^&*()_+-\={}|\[\]\\\\:";'<>?,./])"""
+        regex = symbol_regex + emoji_regex
+        clean_symobl = re.sub(regex," ",text_inp)
+        clean_whitespace = re.sub("\\s+"," "," " +clean_symobl+ " ")
+        return  clean_whitespace
 
 
     # do_fromat控制是否自动清理符号
@@ -116,28 +122,50 @@ class DFATree(object):
         return json_res if return_json else word_list
 
 
-
 if __name__ == '__main__':
-    def test_one():
+    def test_one(content = "   violence violences massacreadwgb violate, purpose, violate purpose, from now on massacre"):
+        print(">>> AT TEST-ONE:")
         dfa = DFATree()
         watch_list = {0:["violences", "violence","violence violences", "massacre", "porn",  "kill", "violate","violate purpose"]}
         print(">>> watch_list:",watch_list)
         dfa.init_from_dict(watch_list)
-        content = "violence violences massacreadwgb violate, purpose, violate purpose, from now on massacre"
         print(">>> json_res: ",dfa.search(content))
         print(">>> res -h:")
         for i in dfa.search(content,return_json=False): print(i)
         dfa.search(content)
 
-    def test_two():
+    def test_two(content = "बिस्तर गर्म, कामक्रीड़ा, सेक्सी"):
+        print("\n\n>>> AT TEST-TWO:")
         dfa = DFATree()
         dfa.init_from_file("/Users/zac/5-Algrithm/python/watch_list.json","json")
-        content = "violence violences massacreadwgb violate, purpose, violate purpose, from now on massacre"
         print(">>> json_res: ",dfa.search(content))
         print(">>> res -h:")
         for i in dfa.search(content,return_json=False): print(i)
         dfa.search(content)
 
-    test_one()
-    test_two()
+    def test_format_hindi():
+        print("印地语看着是一个字实际上是多个字符:")
+        hindi = "बिस्तर गर्म वीर्य हिलती कार"
+        print(len(hindi))
+        for i in hindi:
+            print(i)
+            print(i in hindi)
+        print(hindi)
+        print(DFATree.text_format(hindi))
+        print("印地语的 re.sub: ")
+        content = " बिस्तर गर्म , कामक्रीड़ा , सेक्सी  ~सेक्सी!सेक्सी@सेक्सी#सेक्सी$सेक्सी%सेक्सी^सेक्सी&सेक्सी*सेक्सी(सेक्सी)सेक्सी_सेक्सी+सेक्सी-सेक्सी=सेक्सी{सेक्सी}सेक्सी|सेक्सी[सेक्सी]सेक्सी\सेक्सी:सेक्सी\"सेक्सी;सेक्सी'सेक्सी<सेक्सी>सेक्सी?सेक्सी,सेक्सी.सेक्सी/सेक्सी'सेक्सी"
+        print(content)
+        print("re.sub1",re.sub("""~!@#$%……&\*\(\)_\+`-=\{\}|\[\]\\\\:\";',\./""","\u2717",content))
+        print("re.sub2",re.sub("""[~!@#$%^&*()_+-\={}|\[\]\\\\:";'<>?,./]"""," \u2717 ",content))
+
+
+    # test_one()
+    test_two("बिस्तर गर्म, कामक्रीड़ा, सेक्सी, बिस्तर ग👌र्म")
+
+    # inpupt = sys.argv[1]
+    # print("\n\n原文: ",inpupt)
+    # dfa = DFATree()
+    # dfa.init_from_file("/Users/zac/5-Algrithm/python/watch_list.json","json")
+    # print("\n判断的结果: ",dfa.search(inpupt))
+    # for i in dfa.search(inpupt,return_json=False): print(i)
 

@@ -1,6 +1,8 @@
+# encoding:utf-8
 # author: zac
 # create-time: 2019/6/14 13:55
 # usage: -
+
 
 import itertools
 import re
@@ -158,14 +160,26 @@ if __name__ == '__main__':
         print("re.sub1",re.sub("""~!@#$%……&\*\(\)_\+`-=\{\}|\[\]\\\\:\";',\./""","\u2717",content))
         print("re.sub2",re.sub("""[~!@#$%^&*()_+-\={}|\[\]\\\\:";'<>?,./]"""," \u2717 ",content))
 
+    def test_case_from_file():
+        dfa = DFATree()
+        dfa.init_from_file("/Users/zac/5-Algrithm/python/watch_list.json","json")
+        with open("/Users/zac/5-Algrithm/python/hindi_test_case.txt","r+") as f:
+            test_words = [i.strip() for i in f.readlines()]
+        for w in test_words:
+            print("test-case: ",w)
+            print("result: ", dfa.search(w,return_json=False))
 
     # test_one()
     test_two("बिस्तर गर्म, कामक्रीड़ा, सेक्सी, बिस्तर ग👌र्म")
+    test_case_from_file()
+
+
+
 
     # inpupt = sys.argv[1]
     # print("\n\n原文: ",inpupt)
+    # print("\n判断的结果: ",dfa.search(inpupt))
     # dfa = DFATree()
     # dfa.init_from_file("/Users/zac/5-Algrithm/python/watch_list.json","json")
-    # print("\n判断的结果: ",dfa.search(inpupt))
     # for i in dfa.search(inpupt,return_json=False): print(i)
 

@@ -10,6 +10,12 @@ from PCV.tools import pca
 
 
 
+img_w = 128
+img_h = 128
+img_deep = 3
+pca_demension = 40 # 亦即取40张图去和特征做dot点乘
+k_category = 8 # k-means聚类,设置为8类
+
 #
 imgs_path = "/Users/zac/5-Algrithm/algrithm-data/ImageCluster/images_resized"
 imlist = imtools.get_imlist(imgs_path)

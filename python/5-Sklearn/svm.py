@@ -45,3 +45,8 @@ clf2.fit(x_train, y_train.ravel())  # ravel() 多维数组处理成一维,和fla
 print ("分类器准确率:")
 print clf2.score(x_train, y_train, sample_weight=None)
 y_hat = clf2.predict(x_train)
+
+
+
+
+

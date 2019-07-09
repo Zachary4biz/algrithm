@@ -1,7 +1,7 @@
 # encoding=utf-8
 from numpy import *
 
-
+# 单层决策树
 # From http://blog.csdn.net/u011551096/article/details/51115119
 # 判断一个特征值应该是"lt"还是"rt"
 def stumpClassify(dataMatrix, dimen, threshVal, threshIneq):

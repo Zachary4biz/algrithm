@@ -9,6 +9,7 @@ from PCV.tools import pca
 
 
 
+
 img_w = 128
 img_h = 128
 img_deep = 3
@@ -47,22 +48,22 @@ immatrix = array([array(Image.open(im)).flatten() for im in imlist],'f')
 
 # project on the 40 first PCs
 immean = immean.flatten()
-projected = array([dot(V[:pca_demension],immatrix[i]-immean) for i in range(imnbr)])
+projected = array([dot(V[:30],immatrix[i]-immean) for i in range(imnbr)])
 
 # k-means
 projected = whiten(projected)
-centroids,distortion = kmeans(projected,k_category)
+centroids,distortion = kmeans(projected,8)
 code,distance = vq(projected,centroids)
 
 # plot clusters
-for k in range(k_category):
+for k in range(8):
     ind = where(code==k)[0]
     figure()
     gray()
-    for i in range(minimum(len(ind),pca_demension)):
+    for i in range(minimum(len(ind),40)):
         subplot(4,10,i+1)
-        imshow(immatrix[ind[i]].reshape((img_w, img_h, img_deep)))
-        new_im=Image.fromarray(immatrix[ind[i]].reshape((img_w, img_h, img_deep)).astype(np.uint8))
+        # imshow(immatrix[ind[i]].reshape((600,600,3)))
+        new_im=Image.fromarray(immatrix[ind[i]].reshape((600,600,3)).astype(np.uint8))
         new_im.save("/Users/zac/5-Algrithm/algrithm-data/ImageCluster/images_clustered/%s-%s.jpg"%(k,i))
         axis('off')
 show()

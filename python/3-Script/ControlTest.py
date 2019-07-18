@@ -8,21 +8,19 @@ command1 = """\'tell application \"System Events\"
     key code 53 using {command down, option down}
 end tell\'
 """
-os.system("osascript -e %s" % command1)
 
 # ctr+left 左屏 (失败)
 command2 = """\'tell application \"System Events\"
     key code 126 using (control down)
 end tell\'
 """
-os.system("osascript -e %s" % command2)
 
 # finder 弹出对话框"Hello World"
 command3 = """\'tell application \"Finder\"
     display dialog \"Hello World\"
 end tell\'
 """
-os.system("osascript -e %s" % command3)
+os.system("osascript -e %s" % command2)
 
 
 '''

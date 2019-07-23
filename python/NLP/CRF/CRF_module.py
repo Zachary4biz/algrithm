@@ -43,21 +43,33 @@ class CRF(nn.Module):
         super(CRF, self).__init__()  # super().__init__()
 
         self.n_states = n_dice
+        # randn构造2x3; | 构造这个2x3状态转移概率矩阵，目的是 。。。
+        # Parameter将这个变量加到Module的 .parameters() 的结果里; | 默认是requires_grad=True
+        # init.normal 按指定正态分布填充随机数(均值-1，标准差0.1);
+        # 如下写法也可以
+        # self.transition = nn.Parameter(torch.Tensor(n_dice,n_dice+1))
+        # torch.nn.init.normal_(self.transition,-1,0.1)
         self.transition = torch.nn.init.normal(nn.Parameter(torch.randn(n_dice, n_dice + 1)), -1, 0.1)
+        # 骰子掷出点数的似然矩阵 | shape: (6,2)
         self.loglikelihood = log_likelihood
 
+    # to_scalar取的是展平后的第一个元素（索引0）
     @staticmethod
     def to_scalar(var):
+        # .view就是resize; | view(-1) 展平为一维数组
+        # .data 获得数据；|  tensor.data.tolist() <==> tensor.tolist()
         return var.view(-1).data.tolist()[0]
 
+    # vec在dim=1上的max的索引，取首位
     def argmax(self, vec):
+        # torch.max 根据维度返回（该维度下最大值组成的tensor，索引）； |
         _, idx = torch.max(vec, 1)
         return self.to_scalar(idx)
 
     # numerically stable log sum exp
     # Source: http://pytorch.org/tutorials/beginner/nlp/advanced_tutorial.html
     def log_sum_exp(self, vec):
-        max_score = vec[0, self.argmax(vec)]
+        max_score = vec[0, self.argmax(vec)] # vec的 0行，max列（最大元素所在索引）
         max_score_broadcast = max_score.view(1, -1).expand(1, vec.size()[1])
         return max_score + \
                torch.log(torch.sum(torch.exp(vec - max_score_broadcast)))

@@ -1,7 +1,9 @@
 # author: zac
 # create-time: 2019-07-17 20:25
-# usage: - 
-from .CRF_module import CRF, crf_train_loop
+# usage: -
+import sys
+sys.path.append("./")
+from CRF_module import CRF, crf_train_loop
 import numpy as np
 import torch
 
@@ -17,7 +19,7 @@ import torch
 # #########################################
 probabilities = {
     'fair': np.array([1 / 6] * 6),  # 无偏骰子
-    'loaded': np.array([0.04, 0.04, 0.04, 0.04, 0.04, 0.8]),  # 有偏骰子
+    'loaded': np.array([0.04]*5+[0.8]),  # 有偏骰子
 }
 log_likelihood = np.hstack([np.log(probabilities['fair']).reshape(-1, 1),
                             np.log(probabilities['loaded']).reshape(-1, 1)])
@@ -58,28 +60,29 @@ def simulate_data(n_timesteps):
         state_list[n] = state2ix[next_state]
     return data_list, state_list
 
-sample_size = 5000  # 样本个数（或者说训练次数）
-n_obs = 15  # 投掷次数
-rolls = np.zeros((sample_size, n_obs)).astype(int) # 点数
-dices = np.zeros((sample_size, n_obs)).astype(int) # 骰子 {有偏、无偏}
-for i in range(sample_size):
-    roll_list, dice_list = simulate_data(n_obs)
-    rolls[i] = roll_list.reshape(1, -1).astype(int)
-    dices[i] = dice_list.reshape(1, -1).astype(int)
+if __name__ == '__main__':
+    sample_size = 5000  # 样本个数（或者说训练次数）
+    n_obs = 15  # 投掷次数
+    rolls = np.zeros((sample_size, n_obs)).astype(int) # 点数
+    status_list = np.zeros((sample_size, n_obs)).astype(int) # 骰子 {有偏、无偏}
+    for i in range(sample_size):
+        roll_list, dice_list = simulate_data(n_obs)
+        rolls[i] = roll_list.reshape(1, -1).astype(int)
+        status_list[i] = dice_list.reshape(1, -1).astype(int)
 
-# ############## CRF训练 ########################
-crf = CRF(2, log_likelihood)
-model = crf_train_loop(crf, rolls, dices, 1, 0.001)
+    # ############## CRF训练 ########################
+    crf = CRF(2, log_likelihood)
+    model = crf_train_loop(crf, rolls, status_list, 1, 0.001)
 
-# 持久化
-torch.save(model.state_dict(), "./checkpoint.hdf5")
+    # 持久化
+    torch.save(model.state_dict(), "./checkpoint.hdf5")
 
-# 加载及使用
-model.load_state_dict(torch.load("./checkpoint.hdf5"))
-roll_list, dice_list = simulate_data(15)
-test_rolls = roll_list.reshape(1, -1).astype(int)
-test_targets = dice_list.reshape(1, -1).astype(int)
-print(test_rolls[0])
-print(model.forward(test_rolls[0])[0])
-print(test_targets[0])
-print(list(model.parameters())[0].data.numpy())
+    # 加载及使用
+    model.load_state_dict(torch.load("./checkpoint.hdf5"))
+    roll_list, dice_list = simulate_data(15)
+    test_rolls = roll_list.reshape(1, -1).astype(int)
+    test_targets = dice_list.reshape(1, -1).astype(int)
+    print(test_rolls[0])
+    print(model.forward(test_rolls[0])[0])
+    print(test_targets[0])
+    print(list(model.parameters())[0].data.numpy())

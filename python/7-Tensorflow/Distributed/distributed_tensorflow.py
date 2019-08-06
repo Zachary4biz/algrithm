@@ -77,7 +77,7 @@ def main(_):
 
             train_op = opt.minimize(loss_cross_entropy, global_step=global_step)
             # 定义模型精确度验证模型, 统计模型精确度
-            correrct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+            correrct_prediction = tf.equal(tf.get_idx_of_dim1_max(y, 1), tf.get_idx_of_dim1_max(y_, 1))
             accuracy = tf.reduce_mean(tf.cast(correrct_prediction, tf.float32))
             # 对模型定期做checkpoint, 通常用户模型恢复
             saver = tf.train.Saver()

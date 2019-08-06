@@ -71,7 +71,7 @@ def single_gpu():
 
         all_y = tf.reshape(y, [-1,10])
         all_pred = tf.reshape(pred, [-1,10])
-        correct_pred = tf.equal(tf.argmax(all_y, 1), tf.argmax(all_pred, 1))
+        correct_pred = tf.equal(tf.get_idx_of_dim1_max(all_y, 1), tf.get_idx_of_dim1_max(all_pred, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_pred, 'float'))
 
         print('run train op...')
@@ -203,7 +203,7 @@ def multi_gpu(num_gpu):
 
             all_y = tf.reshape(tf.stack(tower_y, 0), [-1,10])
             all_pred = tf.reshape(tf.stack(tower_preds, 0), [-1,10])
-            correct_pred = tf.equal(tf.argmax(all_y, 1), tf.argmax(all_pred, 1))
+            correct_pred = tf.equal(tf.get_idx_of_dim1_max(all_y, 1), tf.get_idx_of_dim1_max(all_pred, 1))
             accuracy = tf.reduce_mean(tf.cast(correct_pred, 'float'))
             print('reduce model on cpu done.')
 

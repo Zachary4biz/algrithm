@@ -1,11 +1,18 @@
 # author: zac
 # create-time: 2019-08-02 17:21
 # usage: - 
+##############################################################
+#   这个目的是为了用语料上下文训练词向量,不过直接用fb的也好，毕竟fb是
+# 在更大量级的语料上使用。
+#   此外，也可以用train_supervised得到的词向量，因为这里面的词向量
+# 应该是包含了一定的分类信息的，比如同属于金融category下的词，他们的
+# 词向量可能会更相似
+##############################################################
+
 import fasttext
 import json
 from sklearn.model_selection import StratifiedShuffleSplit,GridSearchCV
 from sklearn import metrics
-import xgboost as xgb
 import numpy as np
 import itertools
 import re
@@ -16,6 +23,8 @@ import os
 from collections import deque
 import multiprocessing
 from gensim.models.wrappers import FastText
+import xgboost as xgb
+import pickle
 
 
 base_p = "/data/work/data" # "/Users/zac/Downloads/data" /home/zhoutong/nlp/data
@@ -84,59 +93,25 @@ emb_model.save_model(model_path_emb)
 #######################
 # embedding模型调起
 #######################
-def load_test():
-    model = fasttext.load_model("/home/zhoutong/nlp/data/cc.en.300.bin")
-    vec1 = model.get_word_vector("china")
-    vec2 = model.get_word_vector("america")
-    similarity(vec1,vec2)
+def similarity(v1, v2):
+    n1 = np.linalg.norm(v1)
+    n2 = np.linalg.norm(v2)
+    return np.dot(v1, v2) / n1 / n2
 
-    sen_vec1 = model.get_sentence_vector("I come from china")
-    sen_vec2 = model.get_sentence_vector("I am chinese")
-    np.concatenate([model.get_word_vector(i) for i in ["I","am","chinese"]]) / 3
-    similarity(sen_vec1,sen_vec2)
+model = fasttext.load_model("/home/zhoutong/nlp/data/cc.en.300.bin")
+vec1 = model.get_word_vector("china")
+vec2 = model.get_word_vector("america")
+similarity(vec1,vec2)
 
-    gensim_model = FastText.load_fasttext_format('/home/zhoutong/nlp/data/cc.en.300.bin') # 10min
-    gensim_model.most_similar('teacher')
-    gensim_model.similarity('teacher', 'teaches')
-    gensim_model.init_sims(replace=True)
-    gensim_model.save('/home/zhoutong/nlp/data/cc.en.300.bin.gensim')
-    gensim_model_new = FastText.load('/home/zhoutong/nlp/data/cc.en.300.bin.gensim',mmap='r')
-
-
-test_path = ""
-text = "you can train your dataset using Doc2Vec and then use the sentence vectors. this is one of the best approach which I will recommend. Just take the word vectors and multiply it with their TF-IDF scores."
-model = fasttext.load_model(model_path_emb)
-def _get_article_vector(text):
-    return np.mean([model.get_sentence_vector(sen.strip()) for sen in text.split(".")],axis=0)
-def predict(text):
-    vec = _get_article_vector(text)
-    xgb
-
-sep = '__label__'
-with open(test_path, "r") as f:
-    content = [i.strip() for i in f.readlines()]
-
-label_pred_list = []
-for i in tqdm(content):
-    text = clean_text(i.strip().split(sep)[0])
-    label = sep + i.strip().split(sep)[1]
-    y_pred = predict(text)
-    label_pred_list.append((label,y_pred))
-
-all_label = set(i[0] for i in label_pred_list)
-for curLbl in all_label:
-    TP = sum(label == pred == curLbl for label,pred in label_pred_list)
-    label_as_curLbl = sum(label == curLbl for label,pred in label_pred_list)
-    pred_as_curLbl = sum(pred == curLbl for label,pred in label_pred_list)
-    P = TP / pred_as_curLbl if TP>0 else 0.0
-    R = TP / label_as_curLbl if TP>0 else 0.0
-    F1 = 2.0*P*R/(P+R) if TP>0 else 0.0
-    print("[label]: {}, [recall]: {:.4f}, [precision]: {:.4f}, [f1]: {:.4f}".format(curLbl,R,P,F1))
-
-label_grouped = itertools.groupby(sorted([label for label,pred in label_pred_list]))
-pred_grouped = itertools.groupby(sorted([pred for label,pred in label_pred_list]))
-label_distribution = dict((k,len(list(g))) for k,g in label_grouped)
-pred_distribution = dict((k,len(list(g))) for k,g in pred_grouped)
-print("[label分布]: ", label_distribution)
-print("[pred分布]: ", pred_distribution)
-
+sen_vec1 = model.get_sentence_vector("I come from china")
+sen_vec2 = model.get_sentence_vector("I am chinese")
+np.concatenate([model.get_word_vector(i) for i in ["I","am","chinese"]]) / 3
+similarity(sen_vec1,sen_vec2)
+gensim_model = FastText.load_fasttext_format('/home/zhoutong/nlp/data/cc.en.300.bin') # 10min
+gensim_model.most_similar('teacher')
+gensim_model.similarity('teacher', 'teaches')
+gensim_model.init_sims(replace=True)
+gensim_model.save('/home/zhoutong/nlp/data/cc.en.300.bin.gensim')
+gensim_model_new = FastText.load('/home/zhoutong/nlp/data/cc.en.300.bin.gensim') # <1min
+# mmap='r' only loads the pages into RAM on demand, when they are accessed.
+gensim_model_new_ = FastText.load('/home/zhoutong/nlp/data/cc.en.300.bin.gensim',mmap='r') # <30s

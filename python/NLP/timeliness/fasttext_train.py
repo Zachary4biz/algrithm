@@ -160,7 +160,7 @@ class EnsembleModel(object):
         self.m2 = fasttext.load_model(persist_p2)
         return self
 
-base_p = "/home/zhoutong/nlp/data" # "/Users/zac/Downloads/data" /home/zhoutong/nlp/data /data/work/data
+base_p = "/home/zhoutong/nlp/data/fasttext" # "/Users/zac/Downloads/data" /home/zhoutong/nlp/data /data/work/data
 job = "taste" # timeliness taste emotion region(1,0)
 sep = "__label__"
 
@@ -216,14 +216,14 @@ total_weight_dict = {
     'region':{'__label__0':2.0,'__label__1':1.0}
 }
 
-class Util():
+class Utils():
     # 清理符号
     @staticmethod
     def clean_text(inp_text):
         res = re.sub(r"[~!@#$%^&*()_+-={\}|\[\]:\";'<>?,./]", r' ', inp_text)
         res = re.sub(r"\n+", r" ", res)
         res = re.sub(r"\s+", " ", res)
-        return res
+        return res.strip()
     # fasttext自带的测试API
     @staticmethod
     def fasttext_test(model, file_p):
@@ -301,11 +301,11 @@ def step_gen_samples(case=0):
                 train_idx, test_idx = list(sss.split(sample_list, job_label_list))[0]
                 with open(p_train, "a") as f:
                     for idx in tqdm(train_idx):
-                        to_write = Util.clean_text(sample_list[idx]) + "__label__" + job_label_list[idx]
+                        to_write = Utils.clean_text(sample_list[idx]) + "__label__" + job_label_list[idx]
                         f.writelines(to_write + "\n")
                 with open(p_test, "a") as f:
                     for idx in tqdm(test_idx):
-                        to_write = Util.clean_text(sample_list[idx]) + "__label__" + job_label_list[idx]
+                        to_write = Utils.clean_text(sample_list[idx]) + "__label__" + job_label_list[idx]
                         f.writelines(to_write + "\n")
             else:
                 break
@@ -338,11 +338,11 @@ def step_gen_samples(case=0):
         train_idx, test_idx = list(sss.split(text_list, label_list))[0]
         with open(p_train_downsample, "a") as f:
             for idx in tqdm(train_idx):
-                to_write = Util.clean_text(text_list[idx]) + "__label__" + label_list[idx]
+                to_write = Utils.clean_text(text_list[idx]) + "__label__" + label_list[idx]
                 f.writelines(to_write + "\n")
         with open(p_test_downsample, "a") as f:
             for idx in tqdm(test_idx):
-                to_write = Util.clean_text(text_list[idx]) + "__label__" + label_list[idx]
+                to_write = Utils.clean_text(text_list[idx]) + "__label__" + label_list[idx]
                 f.writelines(to_write + "\n")
     elif case == 2:
         print("oversample 加载各样本")
@@ -375,11 +375,11 @@ def step_gen_samples(case=0):
         train_idx, test_idx = list(sss.split(text_list, label_list))[0]
         with open(p_train_oversample, "a") as f:
             for idx in tqdm(train_idx):
-                to_write = Util.clean_text(text_list[idx]) + "__label__" + label_list[idx]
+                to_write = Utils.clean_text(text_list[idx]) + "__label__" + label_list[idx]
                 f.writelines(to_write + "\n")
         with open(p_test_oversample, "a") as f:
             for idx in tqdm(test_idx):
-                to_write = Util.clean_text(text_list[idx]) + "__label__" + label_list[idx]
+                to_write = Utils.clean_text(text_list[idx]) + "__label__" + label_list[idx]
                 f.writelines(to_write + "\n")
     elif case == 3:
         print("使用预先得到的oversample模型清理oversample的训练集")
@@ -392,7 +392,7 @@ def step_gen_samples(case=0):
         print("预测每条样本 ({})".format(p_train_oversample))
         for idx,c in tqdm(enumerate(content)):
             # c = i.strip()
-            text = Util.clean_text(c.split(sep)[0])
+            text = Utils.clean_text(c.split(sep)[0])
             label = sep + c.split(sep)[1]
             p = premodel.predict(text)
             y_pred,y_prob = p[0][0],round(p[1][0],4)
@@ -400,13 +400,13 @@ def step_gen_samples(case=0):
         print("保存下预测结果")
         with open("temp_predict_res","w+") as f:
             for items in tqdm(idx_label_pred_prob_list):
-                f.writelines("\t".join([str(i) for i in items]))
+                f.writelines("\t".join([str(i) for i in items])+"\n")
         clean = list(filter(lambda x: not (x[-1] >= 0.85 and x[1] != x[2]), idx_label_pred_prob_list))
         print("清理后样本总计 {}，写入 {}".format(len(clean),p_train_oversample_clean))
         with open(p_train_oversample_clean, "w") as f:
             for i in tqdm(clean):
                 c = content[i[0]] # 这里的问题是content里的未清理过、带符号的文本，切分前不能清理以免去掉了__label__的下划线
-                text = Util.clean_text(c.split(sep)[0])
+                text = Utils.clean_text(c.split(sep)[0])
                 label = sep + c.split(sep)[1]
                 f.writelines(text+" "+label+"\n")
     elif case == 4:
@@ -421,7 +421,7 @@ def step_gen_samples(case=0):
             binary_oversample_dict = {sep+"1":deque([], 20 * 10000), sep+"-1":deque([],20*10000)}
             multi_oversample_dict = dict((i, deque([], 9 * 10000)) for i in [sep+"0",sep+"2",sep+"3"])
             for idx, c in tqdm(enumerate(content)):
-                text = Util.clean_text(c.split(sep)[0])
+                text = Utils.clean_text(c.split(sep)[0])
                 label = sep + c.split(sep)[1]
                 if label == sep+"1":
                     binary_oversample_dict[sep+"1"].append(text+" "+label)
@@ -494,11 +494,11 @@ def step_testEmbModel(emb_model,file_path):
         content = [i.strip() for i in f.readlines()]
     label_pred_list = []
     for i in tqdm(content):
-        text = Util.clean_text(i.strip().split(sep)[0])
+        text = Utils.clean_text(i.strip().split(sep)[0])
         label = sep + i.strip().split(sep)[1]
         y_pred = emb_model.predict(text)[0]
         label_pred_list.append((label, y_pred))
-    Util.metric_on_file(label_pred_list)
+    Utils.metric_on_file(label_pred_list)
 # >>>> 任务拆分（ensemble）<<<<
 def step_trainEnsembleModel(train_p1,train_p2,persist_p1,persist_p2,persist_ensembleModel,test_p):
     zprint("train ensembleModel (binary & 3class)")
@@ -535,7 +535,7 @@ def step_testEnsembleModel(ensemble_model,file_path):
     m1_label_pred_list = []
     m2_label_pred_list = []
     for i in tqdm(content):
-        text = Util.clean_text(i.strip().split(sep)[0])
+        text = Utils.clean_text(i.strip().split(sep)[0])
         label = sep + i.strip().split(sep)[1]
         m1_res = ensemble_model.m1.predict(text)[0][0]
         m1_label_pred_list.append((label if label == sep + "1" else sep + "-1", m1_res))
@@ -547,11 +547,11 @@ def step_testEnsembleModel(ensemble_model,file_path):
             y_pred = m2_res
         label_pred_list.append((label, y_pred))
     zprint("m1&m2 的结果：")
-    Util.metric_on_file(label_pred_list)
+    Utils.metric_on_file(label_pred_list)
     zprint("m1 的结果：")
-    Util.metric_on_file(m1_label_pred_list)
+    Utils.metric_on_file(m1_label_pred_list)
     zprint("m2 的结果：")
-    Util.metric_on_file(m2_label_pred_list)
+    Utils.metric_on_file(m2_label_pred_list)
 # >>>> sample & fasttext <<<<
 def step_trainFasttextSampled(train_path_inp, persist_path_inp, test_path_inp, supervised_params_inp=None):
     #######################
@@ -595,7 +595,7 @@ def step_trainFasttextSampled(train_path_inp, persist_path_inp, test_path_inp, s
         clf.quantize(train_path_inp, retrain=True)
     zprint("保存模型..")
     clf.save_model(persist_path_inp)
-    Util.fasttext_test(clf, test_path_inp)
+    Utils.fasttext_test(clf, test_path_inp)
     return clf
 def step_testFasttextModel(fasttext_model,file_path):
     sep = "__label__"
@@ -603,11 +603,11 @@ def step_testFasttextModel(fasttext_model,file_path):
         content = [i.strip() for i in f.readlines()]
     label_pred_list = []
     for i in tqdm(content):
-        text = Util.clean_text(i.strip().split(sep)[0])
+        text = Utils.clean_text(i.strip().split(sep)[0])
         label = sep + i.strip().split(sep)[1]
         y_pred = fasttext_model.predict(text)[0][0]
         label_pred_list.append((label, y_pred))
-    Util.metric_on_file(label_pred_list)
+    Utils.metric_on_file(label_pred_list)
 
 ##############################################################################################################
 # 分析样本分布
@@ -639,14 +639,15 @@ def step_testFasttextModel(fasttext_model,file_path):
 # step_gen_samples(2)
 
 ###############################################
-# 使用已有的模型进行去噪 & 过采样数据集
-###############################################
-step_gen_samples(3)
-
-###############################################
 # 参考级联分类器做boost任务拆分 & 原始数据集
 ###############################################
 # step_gen_samples(4)
+
+###############################################
+# 去噪(使用已有的模型进行) & 过采样数据集
+###############################################
+# step_gen_samples(3)
+
 
 ####################
 # 训练集、模型参数配置
@@ -667,7 +668,7 @@ step_gen_samples(3)
 #   p_train_partial_binary -> model_path_partial_binary
 #   p_train_partial_multi -> model_path_partial_multi
 ####################
-persist_path = model_path_oversample_clean
+persist_path = model_path_oversample
 
 if persist_path == model_path_xgb:
     train_path,test_path = p_train,p_test

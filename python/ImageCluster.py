@@ -24,7 +24,7 @@ imlist = imtools.get_imlist(imgs_path)
 im = array(Image.open(imlist[0])) # open one image to get the size
 m, n = im.shape[:2] # get the size of the images
 imnbr = len(imlist) # get number of images
-print " the number of images is %d" % imnbr
+print(" the number of images is %d" % imnbr)
 
 # Create matrix to store all flattened images
 immatrix = array([array(Image.open(imname)).flatten() for imname in imlist], 'f')

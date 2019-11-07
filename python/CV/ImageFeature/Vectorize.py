@@ -1,7 +1,9 @@
 # author: zac
 # create-time: 2019-11-06 14:18
 # usage: - 
-
+"""
+已添加到 zac_pyutils CVUtils 中
+"""
 import sys
 import importlib
 import numpy as np
@@ -16,40 +18,55 @@ def _get_module(name):
     # return sys.modules.get(name, default=__import__(name))
     return sys.modules.get(name, importlib.import_module(name))
 
+
+
+
+
 class VectorFromNN:
-    class inceptionV3:
-        url = "https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/4"
-        IMAGE_SHAPE = (299, 299)  # inception_v3 强制shape是299x299
-        @staticmethod
-        def pre_format_pilImage(imgPIL):
-            return np.array(imgPIL.resize(VectorFromNN.inceptionV3.IMAGE_SHAPE)) / 255.0
+    class _BasePattern:
+        default_model = None
+        url = None
 
-    default_model = None
-    def get_default_model(self):
-        if self.default_model is None:
-            self.default_model = VectorFromNN.init_inceptionV3()
-        return self.default_model
+        def get_default_model(self):
+            if self.default_model is None:
+                self.default_model = tf.keras.Sequential([hub.KerasLayer(self.url, trainable=False)])
+            return self.default_model
 
-    @staticmethod
-    def init_inceptionV3():
-        f_vec = tf.keras.Sequential([hub.KerasLayer(VectorFromNN.inceptionV3.url, output_shape=[2048], trainable=False)])
-        return f_vec
+        def pre_format_pilImage(self, imgPIL):
+            raise NotImplementedError
 
-    def imgPIL2vec(self, imgPIL, model=None):
-        imgArr = VectorFromNN.inceptionV3.pre_format_pilImage(imgPIL)
-        return self.imgArr2vec(imgArr,model=model)
+        def imgPIL2vec(self, imgPIL, model=None):
+            imgArr = self.pre_format_pilImage(imgPIL)
+            return self.imgArr2vec(imgArr, model=model)
 
-    def imgPIL2vec_batch(self, imgPIL_batch, model=None):
-        imgArr_batch = np.array([VectorFromNN.inceptionV3.pre_format_pilImage(imgPIL) for imgPIL in imgPIL_batch])
-        return self.imgArr2vec_batch(imgArr_batch,model=model)
+        def imgPIL2vec_batch(self, imgPIL_batch, model=None):
+            imgArr_batch = np.array([self.pre_format_pilImage(imgPIL) for imgPIL in imgPIL_batch])
+            return self.imgArr2vec_batch(imgArr_batch, model=model)
 
-    def imgArr2vec(self, imgArr, model=None):
-        return self.imgArr2vec_batch(imgArr[np.newaxis, :], model=model)[0]
+        def imgArr2vec(self, imgArr, model=None):
+            return self.imgArr2vec_batch(imgArr[np.newaxis, :], model=model)[0]
 
-    def imgArr2vec_batch(self, imgArr_batch, model=None):
-        if model is None:
-            model = self.get_default_model()
-        return model.predict(imgArr_batch)
+        def imgArr2vec_batch(self, imgArr_batch, model=None):
+            if model is None:
+                model = self.get_default_model()
+            return model.predict(imgArr_batch)
+
+    class InceptionV3(_BasePattern):
+        # 这个是根据 transferlearning 的指导加载模型
+        # url = "https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/4"
+        url = "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/4"
+        IMAGE_SHAPE = (299, 299)  # 299x299好一些
+
+        def pre_format_pilImage(self, imgPIL):
+            return np.array(imgPIL.resize(self.IMAGE_SHAPE)) / 255.0
+
+    class InceptionV1(_BasePattern):
+        url = "https://tfhub.dev/google/imagenet/inception_v1/feature_vector/4"
+        IMAGE_SHAPE = (224, 224)
+
+        def pre_format_pilImage(self, imgPIL):
+            return np.array(imgPIL.resize(self.IMAGE_SHAPE)) / 255.0
+
 
 class StandardCV:
     @staticmethod
@@ -280,7 +297,7 @@ if __name__ == '__main__':
 
     def test_case2():
         print(">>> 验证NN相似向量")
-        transformer = VectorFromNN()
+        transformer = VectorFromNN.InceptionV3()
         vec1 = transformer.imgPIL2vec(test_img)
         vec2 = transformer.imgPIL2vec(test_img2)
         from ImageFeature import Hist

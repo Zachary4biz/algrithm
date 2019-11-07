@@ -66,16 +66,18 @@ class Samples:
     def random_samples(cnt=20):
         return random.sample(Samples.blue_birds+Samples.cartoon+Samples.white_cat+Samples.pyramid, cnt)
 
+
+# 使用NN的最后一层作为图片的特征向量
 def test_flow_vec_nn(img1, img_list, show=False, sortBy="total"):
     assert sortBy in ['total', 'color', 'lbp']
     sort_idx = ['total', 'color', 'lbp'].index(sortBy) + 2
     res = []
-    transformer = Vectorize.VectorFromNN()
+    transformer = Vectorize.VectorFromNN.InceptionV3()
     img1_vec = transformer.imgPIL2vec(img1)
     img_vec_list = transformer.imgPIL2vec_batch(img_list)
     for idx, img2_vec in tqdm(enumerate(img_vec_list), desc="sim_comp"):
         totalsim=Hist.General.cos_sim(img1_vec, img2_vec)
-        res.append((idx, img_list[idx].resize(transformer.inceptionV3.IMAGE_SHAPE), totalsim))
+        res.append((idx, img_list[idx].resize(transformer.IMAGE_SHAPE), totalsim))
     res.sort(key=lambda x:x[sort_idx], reverse=True)
     if show:
         show_res = res
@@ -92,6 +94,7 @@ def test_flow_vec_nn(img1, img_list, show=False, sortBy="total"):
     print(res)
     return res
 
+# 多个子区域的直方图各自独立计算相似度然后取均值
 def test_flow_nested(img1, img_list, show=False, sortBy="total"):
     assert sortBy in ['total', 'color', 'lbp']
     sort_idx = ['total', 'color', 'lbp'].index(sortBy) + 2
@@ -123,6 +126,7 @@ def test_flow_nested(img1, img_list, show=False, sortBy="total"):
     print(res)
     return res
 
+# 多个子区域的直方图拼接到一起计算相似度 | 效果不如nested取均值
 def test_flow(img1, img_list, show=False, sortBy="total"):
     assert sortBy in ['total', 'color', 'lbp']
     sort_idx = ['total', 'color', 'lbp'].index(sortBy) + 2
@@ -150,6 +154,7 @@ def test_flow(img1, img_list, show=False, sortBy="total"):
     print(res)
     return res
 
+# 展示一张图的hist、crops
 def single_img_detail(img_inp):
     img_lbp = Hist.PILImage.get_img_lbp(img_inp)
     # weights = np.array([[1, 1, 1, 1],
@@ -171,6 +176,51 @@ test_flow_vec_nn(img1=img1.convert("RGB"),img_list=[img.convert("RGB") for img i
 # single_img_detail(img_list[2])
 
 plt.show()
+exit(0)
+
+# CBIR
+# 1.
+import pickle
+with open("/Users/zac/Downloads/picku_materials.csv", "r") as fr:
+    ids_urls=[i.strip().split(",")[:2] for i in fr.readlines()][1:]
+
+transformer = Vectorize.VectorFromNN()
+res = []
+for (id_, url) in tqdm(ids_urls):
+    try:
+        img = CVUtils.Load.image_by_pil_from(url).convert("RGB")
+        res.append((id_, url, transformer.imgPIL2vec(img)))
+    except Exception:
+        res.append((id_, url, None))
+
+with open("/Users/zac/Downloads/info.pck","wb+") as fwb:
+    pickle.dump(res,fwb)
+
+# 2.
+with open("/Users/zac/Downloads/info.pck","rb") as frb:
+    info = pickle.load(frb)
+
+def get_fig(target):
+    res = sorted([i+(Vectorize.Scripts.cos_sim(target[2], i[2]),) for i in info if i[2] is not None], key=lambda x: x[-1], reverse=True)
+    fig = plt.figure(figsize=(10,10))
+    fig.set_tight_layout(True)
+    fig.add_subplot(3,5,1)
+    plt.axis("off")
+    plt.imshow(np.array(CVUtils.Load.image_by_pil_from(target[1])))
+    for idx,sim_target in enumerate(res[:14]):
+        img = CVUtils.Load.image_by_pil_from(sim_target[1]).resize((299,299))
+        fig.add_subplot(3,5, idx+2)
+        plt.axis("off")
+        plt.imshow(np.array(img))
+        plt.text(x=0, y=img.size[1]+65, s=f"[id]: {sim_target[0]}\n[sim]:{sim_target[3]:.3f}", fontsize=9)
+    return fig, res
+
+for target in tqdm(info):
+    fig,res = get_fig(target)
+    fig.savefig("/Users/zac/Downloads/sim_samples/{}.png".format(target[0]))
+    with open("/Users/zac/Downloads/sim_samples/sim_info.csv", "a") as fa:
+        fa.writelines(target[0]+","+"|".join([i[0] for i in res])+"\n")
+
 exit(0)
 
 

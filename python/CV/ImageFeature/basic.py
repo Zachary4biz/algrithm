@@ -2,7 +2,7 @@
 # create-time: 2019-10-28 16:50
 # usage: -
 from zac_pyutils import CVUtils,ExqUtils
-from ImageFeature import Hist, Vectorize
+from ImageFeature import Hist
 import skimage.segmentation as seg
 import matplotlib
 matplotlib.use('Qt5Agg')
@@ -72,11 +72,11 @@ def test_flow_vec_nn(img1, img_list, show=False, sortBy="total"):
     assert sortBy in ['total', 'color', 'lbp']
     sort_idx = ['total', 'color', 'lbp'].index(sortBy) + 2
     res = []
-    transformer = Vectorize.VectorFromNN.InceptionV3()
+    transformer = CVUtils.Vectorize.VectorFromNN.InceptionV3()
     img1_vec = transformer.imgPIL2vec(img1)
     img_vec_list = transformer.imgPIL2vec_batch(img_list)
     for idx, img2_vec in tqdm(enumerate(img_vec_list), desc="sim_comp"):
-        totalsim=Hist.General.cos_sim(img1_vec, img2_vec)
+        totalsim=CVUtils.cos_sim(img1_vec, img2_vec)
         res.append((idx, img_list[idx].resize(transformer.IMAGE_SHAPE), totalsim))
     res.sort(key=lambda x:x[sort_idx], reverse=True)
     if show:
@@ -94,8 +94,12 @@ def test_flow_vec_nn(img1, img_list, show=False, sortBy="total"):
     print(res)
     return res
 
+# 整张图取主题色然后多个
+def test_flow_nested_themecolor(img1, img_list, show=False, sortBy='total'):
+    pass
+
 # 多个子区域的直方图各自独立计算相似度然后取均值
-def test_flow_nested(img1, img_list, show=False, sortBy="total"):
+def test_flow_nested_hist(img1, img_list, show=False, sortBy="total"):
     assert sortBy in ['total', 'color', 'lbp']
     sort_idx = ['total', 'color', 'lbp'].index(sortBy) + 2
     res = []
@@ -104,9 +108,9 @@ def test_flow_nested(img1, img_list, show=False, sortBy="total"):
                             1,2,2,1,
                             1,2,2,1,
                             1,1,1,1]]).flatten()
-        totalsim=Hist.General.cos_sim_nested(Hist.PILImage.get_vector_nested(img1), Hist.PILImage.get_vector_nested(img2), weight=weight) # 0.8145783040892348
-        histsim=Hist.General.cos_sim_nested(Hist.PILImage.get_vector_nested(img1, lbp_weight=0), Hist.PILImage.get_vector_nested(img2, lbp_weight=0), weight=weight) # 0.7991958782854643
-        lbpsim=Hist.General.cos_sim_nested(Hist.PILImage.get_vector_nested(img1, color_weight=0), Hist.PILImage.get_vector_nested(img2, color_weight=0), weight=weight) # 0.9573060906603772
+        totalsim=CVUtils.cos_sim_nested(Hist.PILImage.get_vector_nested(img1), Hist.PILImage.get_vector_nested(img2), weight=weight) # 0.8145783040892348
+        histsim=CVUtils.cos_sim_nested(Hist.PILImage.get_vector_nested(img1, lbp_weight=0), Hist.PILImage.get_vector_nested(img2, lbp_weight=0), weight=weight) # 0.7991958782854643
+        lbpsim=CVUtils.cos_sim_nested(Hist.PILImage.get_vector_nested(img1, color_weight=0), Hist.PILImage.get_vector_nested(img2, color_weight=0), weight=weight) # 0.9573060906603772
         res.append((idx, img2, totalsim, histsim, lbpsim))
     res.sort(key=lambda x:x[2], reverse=True)
     if show:
@@ -167,11 +171,11 @@ def single_img_detail(img_inp):
     Hist.General.plot_hist_crops(hist_rgb, crops_rgb).show()
     Hist.General.plot_hist_crops(hist_lbp, crops_lbp).show()
 
-img1 = CVUtils.Load.image_by_pil_from(Samples.blue_birds[0]).resize((64, 64)).convert(MODE)
-# img_list = [CVUtils.Load.image_by_pil_from(i).resize((64, 64)).convert(MODE).rotate(0) for i in Samples.random_samples(30)]
-img_list = [CVUtils.Load.image_by_pil_from(i).resize((64, 64)).convert(MODE).rotate(0) for i in Samples.blue_birds]
+img1 = CVUtils.Load.image_by_pil_from(Samples.white_cat[0]).resize((64, 64)).convert(MODE)
+img_list = [CVUtils.Load.image_by_pil_from(i).resize((64, 64)).convert(MODE).rotate(0) for i in Samples.random_samples(30)]
+# img_list = [CVUtils.Load.image_by_pil_from(i).resize((64, 64)).convert(MODE).rotate(0) for i in Samples.blue_birds]
 # test_flow(img1=img1,img_list=img_list,show=True)
-# test_flow_nested(img1=img1,img_list=img_list,show=True)
+# test_flow_nested_hist(img1=img1,img_list=img_list,show=True)
 test_flow_vec_nn(img1=img1.convert("RGB"),img_list=[img.convert("RGB") for img in img_list],show=True)
 # single_img_detail(img_list[2])
 
@@ -184,7 +188,7 @@ import pickle
 with open("/Users/zac/Downloads/picku_materials.csv", "r") as fr:
     ids_urls=[i.strip().split(",")[:2] for i in fr.readlines()][1:]
 
-transformer = Vectorize.VectorFromNN()
+transformer = CVUtils.Vectorize.VectorFromNN.InceptionV3()
 res = []
 for (id_, url) in tqdm(ids_urls):
     try:
@@ -193,15 +197,15 @@ for (id_, url) in tqdm(ids_urls):
     except Exception:
         res.append((id_, url, None))
 
-with open("/Users/zac/Downloads/info.pck","wb+") as fwb:
+with open("/Users/zac/Downloads/img_vec_inceptionV3.pck","wb+") as fwb:
     pickle.dump(res,fwb)
 
 # 2.
-with open("/Users/zac/Downloads/info.pck","rb") as frb:
+with open("/Users/zac/Downloads/img_vec_inceptionV3.pck","rb") as frb:
     info = pickle.load(frb)
 
 def get_fig(target):
-    res = sorted([i+(Vectorize.Scripts.cos_sim(target[2], i[2]),) for i in info if i[2] is not None], key=lambda x: x[-1], reverse=True)
+    res = sorted([i+(CVUtils.cos_sim(target[2], i[2]),) for i in info if i[2] is not None], key=lambda x: x[-1], reverse=True)
     fig = plt.figure(figsize=(10,10))
     fig.set_tight_layout(True)
     fig.add_subplot(3,5,1)
